@@ -1,0 +1,432 @@
+//@version=6
+indicator("Sai_ToolBox1027", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+// ============================================================================
+// Settings
+// ============================================================================
+groupTimezone = "时区"
+groupKeyPoints = "重要点位"
+groupLines = "任意竖线"
+groupRegions = "区间背景"
+utcOffset = input.int(-4, "UTC (+/-)", minval=-12, maxval=14, group=groupTimezone)
+
+// --- 重要点位：昨日高/低点（PDH / PDL）---
+showPdhPdl = input.bool(true, "昨日高/低点", group=groupKeyPoints, tooltip="样式代码：xxx 行，xxx 行", inline="kp_pdhpdl")
+pdhColor = input.color(color.rgb(255, 82, 82), "PDH", group=groupKeyPoints, inline="kp_pdhpdl")
+pdlColor = input.color(color.rgb(0, 200, 120), "PDL", group=groupKeyPoints, inline="kp_pdhpdl")
+// --- 重要点位：亚盘高/低点（AH / AL）---
+showAhAl = input.bool(true, "亚盘高/低点", group=groupKeyPoints, tooltip="美东 19:00 & 0:00", inline="kp_ahal")
+ahColor = input.color(color.rgb(255, 92, 0), "AH", group=groupKeyPoints, inline="kp_ahal")
+alColor = input.color(color.rgb(37, 99, 235), "AL", group=groupKeyPoints, inline="kp_ahal")
+// --- 重要点位：欧盘高/低点（EH / EL）---
+showEhEl = input.bool(true, "欧盘高/低点", group=groupKeyPoints, tooltip="美东 02:00 & 05:00", inline="kp_ehel")
+ehColor = input.color(color.rgb(168, 85, 247), "EH", group=groupKeyPoints, inline="kp_ehel")
+elColor = input.color(color.rgb(6, 182, 212), "EL", group=groupKeyPoints, inline="kp_ehel")
+showLevelTime = input.bool(true, "点位标签显示时间", group=groupKeyPoints, tooltip="在 AH/AL/EH/EL 标签后显示点位形成时间")
+// --- 重要点位：午夜开盘价（MO）---
+showMo = input.bool(true, "午夜开盘价", group=groupKeyPoints, tooltip="美东 0:00", inline="kp_mo")
+moColor = input.color(color.rgb(35, 39, 50), "MO", group=groupKeyPoints, inline="kp_mo")
+
+// --- 任意竖线 ---
+vl1On = input.bool(true, "", group=groupLines, inline="line_1")
+vl1Time = input.string("09:00", "", group=groupLines, inline="line_1")
+vl1Color = input.color(color.rgb(255, 92, 0), "", group=groupLines, inline="line_1")
+vl1StyleText = input.string("点虚线", "", options=["实线", "点虚线", "虚线"], group=groupLines, inline="line_1")
+vl1Width = input.int(1, "", minval=1, maxval=5, group=groupLines, inline="line_1")
+vl2On = input.bool(true, "", group=groupLines, inline="line_2")
+vl2Time = input.string("10:30", "", group=groupLines, inline="line_2")
+vl2Color = input.color(color.rgb(255, 92, 0), "", group=groupLines, inline="line_2")
+vl2StyleText = input.string("点虚线", "", options=["实线", "点虚线", "虚线"], group=groupLines, inline="line_2")
+vl2Width = input.int(1, "", minval=1, maxval=5, group=groupLines, inline="line_2")
+vlShowNext = input.bool(false, "Show Next Future Line", group=groupLines)
+
+// --- 区间背景 ---
+region1On = input.bool(true, "", group=groupRegions, inline="region_1")
+region1Name = input.string("亚盘", "", group=groupRegions, inline="region_1")
+region1Session = input.session("2100-2200", "", group=groupRegions, inline="region_1")
+region1Color = input.color(color.new(color.rgb(37, 99, 235), 82), "", group=groupRegions, inline="region_1")
+region2On = input.bool(true, "", group=groupRegions, inline="region_2")
+region2Name = input.string("欧盘", "", group=groupRegions, inline="region_2")
+region2Session = input.session("0300-0400", "", group=groupRegions, inline="region_2")
+region2Color = input.color(color.new(color.rgb(37, 99, 235), 82), "", group=groupRegions, inline="region_2")
+region3On = input.bool(true, "", group=groupRegions, inline="region_3")
+region3Name = input.string("美盘", "", group=groupRegions, inline="region_3")
+region3Session = input.session("0930-1200", "", group=groupRegions, inline="region_3")
+region3Color = input.color(color.new(color.rgb(37, 99, 235), 82), "", group=groupRegions, inline="region_3")
+region4On = input.bool(false, "", group=groupRegions, inline="region_4")
+region4Name = input.string("", "", group=groupRegions, inline="region_4")
+region4Session = input.session("1545-1600", "", group=groupRegions, inline="region_4")
+region4Color = input.color(color.new(color.rgb(37, 99, 235), 82), "", group=groupRegions, inline="region_4")
+regionShowNext = input.bool(false, "Show Next Future Session", group=groupRegions)
+
+// ============================================================================
+// Shared Helpers
+// ============================================================================
+msInDay = 24 * 60 * 60 * 1000
+toolboxTimezone = utcOffset == 0 ? "UTC" : "UTC" + (utcOffset > 0 ? "+" : "") + str.tostring(utcOffset)
+// 亚盘高/低点、午夜开盘价的固定基准时区：真实美东时间，自动处理夏令时
+nyTimezone = "America/New_York"
+transparentColor = #ffffff00
+rangeLow = ta.lowest(low, 300)
+rangeHigh = ta.highest(high, 300)
+rangeSize = math.max(rangeHigh - rangeLow, syminfo.mintick * 100)
+regionTop = rangeHigh + rangeSize * 0.25
+regionBottom = rangeLow - rangeSize * 0.25
+regionLabelY = rangeHigh + rangeSize * 0.04
+f_hour(sessionText, offset) =>
+    int(str.tonumber(str.substring(sessionText, offset, offset + 2)))
+f_minute(sessionText, offset) =>
+    int(str.tonumber(str.substring(sessionText, offset + 2, offset + 4)))
+f_point_part(timeText, startIndex, endIndex) =>
+    str.length(timeText) >= endIndex ? int(str.tonumber(str.substring(timeText, startIndex, endIndex))) : na
+f_point_hour(timeText) =>
+    f_point_part(timeText, 0, 2)
+f_point_minute(timeText) =>
+    f_point_part(timeText, 3, 5)
+f_valid_point_time(timeText) =>
+    hourValue = f_point_hour(timeText)
+    minuteValue = f_point_minute(timeText)
+    str.length(timeText) >= 5 and not na(hourValue) and not na(minuteValue) and hourValue >= 0 and hourValue <= 23 and minuteValue >= 0 and minuteValue <= 59
+f_start_hour(sessionText) =>
+    f_hour(sessionText, 0)
+f_start_minute(sessionText) =>
+    f_minute(sessionText, 0)
+f_end_hour(sessionText) =>
+    f_hour(sessionText, 5)
+f_end_minute(sessionText) =>
+    f_minute(sessionText, 5)
+f_ts(baseTime, hourValue, minuteValue) =>
+    timestamp(toolboxTimezone, year(baseTime, toolboxTimezone), month(baseTime, toolboxTimezone), dayofmonth(baseTime, toolboxTimezone), hourValue, minuteValue)
+f_point_ts(baseTime, timeText) =>
+    f_valid_point_time(timeText) ? f_ts(baseTime, f_point_hour(timeText), f_point_minute(timeText)) : na
+f_is_point_time(timeText) =>
+    pointTime = f_point_ts(time, timeText)
+    not na(pointTime) and time <= pointTime and pointTime < time_close
+f_next_time(hourValue, minuteValue) =>
+    todayTime = f_ts(time_close, hourValue, minuteValue)
+    time_close < todayTime ? todayTime : f_ts(time_close + msInDay, hourValue, minuteValue)
+f_region_end(startTime, baseTime, endHour, endMinute) =>
+    endToday = f_ts(baseTime, endHour, endMinute)
+    endToday <= startTime ? f_ts(baseTime + msInDay, endHour, endMinute) : endToday
+f_day_start(baseTime) =>
+    timestamp(toolboxTimezone, year(baseTime, toolboxTimezone), month(baseTime, toolboxTimezone), dayofmonth(baseTime, toolboxTimezone), 0, 0)
+f_line_style(styleText) =>
+    if styleText == "实线" or styleText == "Solid"
+        line.style_solid
+    else if styleText == "点虚线" or styleText == "Dotted"
+        line.style_dotted
+    else if styleText == "虚线" or styleText == "Dashed"
+        line.style_dashed
+    else
+        line.style_solid
+f_pad2(n) =>
+    n < 10 ? "0" + str.tostring(n) : str.tostring(n)
+f_et_time_str(barTime) =>
+    h = hour(barTime, nyTimezone)
+    m = minute(barTime, nyTimezone)
+    f_pad2(h) + ":" + f_pad2(m)
+
+// 通用"水平点位线"管理器（AH / AL / MO 共用）：
+// 样式 = 1 号点虚线，虚线颜色与文字颜色一致，文字在虚线右端
+// 从 anchorBar（事件发生 bar）一直画到 bar_index + 1（右侧留白 1 根 bar），每根 bar 更新右端，永远跟着 K 线走
+f_level_update(existingLine, existingLabel, isEnabled, priceValue, anchorBar, labelText, lineColorValue) =>
+    line resultLine = existingLine
+    label resultLabel = existingLabel
+    rightBar = bar_index + 1
+    if isEnabled and not na(priceValue) and not na(anchorBar)
+        if na(resultLine)
+            resultLine := line.new(anchorBar, priceValue, rightBar, priceValue, xloc=xloc.bar_index, extend=extend.none, color=lineColorValue, width=1, style=line.style_dotted)
+        else
+            line.set_xy1(resultLine, anchorBar, priceValue)
+            line.set_xy2(resultLine, rightBar, priceValue)
+            line.set_color(resultLine, lineColorValue)
+            line.set_style(resultLine, line.style_dotted)
+            line.set_width(resultLine, 1)
+        if na(resultLabel)
+            resultLabel := label.new(rightBar, priceValue, labelText, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, color=transparentColor, textcolor=lineColorValue, size=size.small)
+        else
+            label.set_x(resultLabel, rightBar)
+            label.set_y(resultLabel, priceValue)
+            label.set_text(resultLabel, labelText)
+            label.set_textcolor(resultLabel, lineColorValue)
+            label.set_color(resultLabel, transparentColor)
+            label.set_size(resultLabel, size.small)
+    else
+        if not na(resultLine)
+            line.delete(resultLine)
+            resultLine := na
+        if not na(resultLabel)
+            label.delete(resultLabel)
+            resultLabel := na
+    [resultLine, resultLabel]
+
+// ============================================================================
+// Tool: 重要点位 - 昨日高/低点 (PDH / PDL)
+// ============================================================================
+pdhPdlLineBars = 2
+[prevDayHigh, prevDayLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]])
+f_pdhpdl_update_line(existingLine, enabled, price, lineColorValue) =>
+    line result = existingLine
+    if enabled and not na(price)
+        x1 = bar_index + 10
+        x2 = bar_index + 11 + pdhPdlLineBars
+        if na(result)
+            result := line.new(x1, price, x2, price, xloc=xloc.bar_index, extend=extend.none, color=lineColorValue, width=1)
+        else
+            line.set_xy1(result, x1, price)
+            line.set_xy2(result, x2, price)
+            line.set_color(result, lineColorValue)
+            line.set_width(result, 1)
+            line.set_extend(result, extend.none)
+    else
+        if not na(result)
+            line.delete(result)
+            result := na
+    result
+f_pdhpdl_update_label(existingLabel, enabled, price, labelText, labelColor) =>
+    label result = existingLabel
+    if enabled and not na(price)
+        x = bar_index + 10 + pdhPdlLineBars
+        y = price
+        if na(result)
+            result := label.new(x, y, labelText, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_none, color=color.new(color.black, 100), textcolor=labelColor, size=size.small, textalign=text.align_right)
+        else
+            label.set_x(result, x)
+            label.set_y(result, y)
+            label.set_text(result, labelText)
+            label.set_textcolor(result, labelColor)
+            label.set_color(result, color.new(color.black, 100))
+            label.set_textalign(result, text.align_right)
+    else
+        if not na(result)
+            label.delete(result)
+            result := na
+    result
+var line pdhLine = na
+var line pdlLine = na
+var label pdhLabel = na
+var label pdlLabel = na
+if barstate.islast
+    pdhLine := f_pdhpdl_update_line(pdhLine, showPdhPdl, prevDayHigh, pdhColor)
+    pdlLine := f_pdhpdl_update_line(pdlLine, showPdhPdl, prevDayLow, pdlColor)
+    pdhLabel := f_pdhpdl_update_label(pdhLabel, showPdhPdl, prevDayHigh, "PDH", pdhColor)
+    pdlLabel := f_pdhpdl_update_label(pdlLabel, showPdhPdl, prevDayLow, "PDL", pdlColor)
+
+// ============================================================================
+// Tool: 重要点位 - 亚盘高/低点 (AH / AL)
+// 美东时间 19:00 - 24:00 的极值；取最近时段：亚盘进行中实时更新，其余时间保持最近一个已完成时段的数值
+// ============================================================================
+inAsian = hour(time, nyTimezone) >= 19
+asianStarts = inAsian and not inAsian[1]
+var float asianHigh = na
+var float asianLow = na
+var int ahStartBar = na
+var int alStartBar = na
+var int ahBarTime = na
+var int alBarTime = na
+if asianStarts
+    asianHigh := high
+    asianLow := low
+    ahStartBar := bar_index
+    alStartBar := bar_index
+    ahBarTime := time
+    alBarTime := time
+else if inAsian
+    if high > asianHigh
+        asianHigh := high
+        ahStartBar := bar_index
+        ahBarTime := time
+    if low < asianLow
+        asianLow := low
+        alStartBar := bar_index
+        alBarTime := time
+var line ahLine = na
+var label ahLabel = na
+var line alLine = na
+var label alLabel = na
+ahText = "AH" + (showLevelTime and not na(ahBarTime) ? " " + f_et_time_str(ahBarTime) : "")
+alText = "AL" + (showLevelTime and not na(alBarTime) ? " " + f_et_time_str(alBarTime) : "")
+[updatedAhLine, updatedAhLabel] = f_level_update(ahLine, ahLabel, showAhAl, asianHigh, ahStartBar, ahText, ahColor)
+ahLine := updatedAhLine
+ahLabel := updatedAhLabel
+[updatedAlLine, updatedAlLabel] = f_level_update(alLine, alLabel, showAhAl, asianLow, alStartBar, alText, alColor)
+alLine := updatedAlLine
+alLabel := updatedAlLabel
+
+// ============================================================================
+// Tool: 重要点位 - 欧盘高/低点 (EH / EL)
+// 美东时间 02:00 - 05:00 的极值
+// ============================================================================
+inEuro = hour(time, nyTimezone) >= 2 and hour(time, nyTimezone) < 5
+euroStarts = inEuro and not inEuro[1]
+var float euroHigh = na
+var float euroLow = na
+var int ehStartBar = na
+var int elStartBar = na
+var int ehBarTime = na
+var int elBarTime = na
+if euroStarts
+    euroHigh := high
+    euroLow := low
+    ehStartBar := bar_index
+    elStartBar := bar_index
+    ehBarTime := time
+    elBarTime := time
+else if inEuro
+    if high > euroHigh
+        euroHigh := high
+        ehStartBar := bar_index
+        ehBarTime := time
+    if low < euroLow
+        euroLow := low
+        elStartBar := bar_index
+        elBarTime := time
+var line ehLine = na
+var label ehLabel = na
+var line elLine = na
+var label elLabel = na
+ehText = "EH" + (showLevelTime and not na(ehBarTime) ? " " + f_et_time_str(ehBarTime) : "")
+elText = "EL" + (showLevelTime and not na(elBarTime) ? " " + f_et_time_str(elBarTime) : "")
+[updatedEhLine, updatedEhLabel] = f_level_update(ehLine, ehLabel, showEhEl, euroHigh, ehStartBar, ehText, ehColor)
+ehLine := updatedEhLine
+ehLabel := updatedEhLabel
+[updatedElLine, updatedElLabel] = f_level_update(elLine, elLabel, showEhEl, euroLow, elStartBar, elText, elColor)
+elLine := updatedElLine
+elLabel := updatedElLabel
+
+// ============================================================================
+// Tool: 重要点位 - 午夜开盘价 (MO)
+// 美东时间 0:00 的开盘价；取最近一次 0:00
+// 仿 tradeforopp Opening Prices：用 time("", "0000-0001", nyTz) 检测零点 bar，命中时取 open
+// ============================================================================
+moSession = "0000-0001"
+isMoTime = not na(time("", moSession, nyTimezone))
+moStarts = isMoTime and not isMoTime[1]
+var float moPrice = na
+var int moStartBar = na
+if moStarts
+    moPrice := open
+    moStartBar := bar_index
+var line moLine = na
+var label moLabel = na
+[updatedMoLine, updatedMoLabel] = f_level_update(moLine, moLabel, showMo, moPrice, moStartBar, "MO", moColor)
+moLine := updatedMoLine
+moLabel := updatedMoLabel
+
+// ============================================================================
+// Tool: 任意竖线 (Draw Vertical Lines)
+// ============================================================================
+f_vl_draw(enabled, timeText, lineColorValue, styleText, lineWidthValue) =>
+    targetTime = f_point_ts(time, timeText)
+    if enabled and not na(targetTime) and time <= targetTime and targetTime < time_close
+        line.new(targetTime, low, targetTime, high, xloc=xloc.bar_time, extend=extend.both, color=lineColorValue, width=lineWidthValue, style=f_line_style(styleText))
+f_vl_update_future(existingLine, enabled, timeText, lineColorValue, styleText, lineWidthValue) =>
+    line result = existingLine
+    hourValue = f_point_hour(timeText)
+    minuteValue = f_point_minute(timeText)
+    nextTime = f_valid_point_time(timeText) ? f_next_time(hourValue, minuteValue) : na
+    lineStyle = f_line_style(styleText)
+    if enabled and vlShowNext and not na(nextTime)
+        if na(result)
+            result := line.new(nextTime, rangeLow, nextTime, rangeHigh, xloc=xloc.bar_time, extend=extend.both, color=lineColorValue, width=lineWidthValue, style=lineStyle)
+        else
+            line.set_xy1(result, nextTime, rangeLow)
+            line.set_xy2(result, nextTime, rangeHigh)
+            line.set_color(result, lineColorValue)
+            line.set_width(result, lineWidthValue)
+            line.set_style(result, lineStyle)
+    else
+        if not na(result)
+            line.delete(result)
+            result := na
+    result
+f_vl_draw(vl1On, vl1Time, vl1Color, vl1StyleText, vl1Width)
+f_vl_draw(vl2On, vl2Time, vl2Color, vl2StyleText, vl2Width)
+var line vlFutureLine1 = na
+var line vlFutureLine2 = na
+if barstate.islast
+    vlFutureLine1 := f_vl_update_future(vlFutureLine1, vl1On, vl1Time, vl1Color, vl1StyleText, vl1Width)
+    vlFutureLine2 := f_vl_update_future(vlFutureLine2, vl2On, vl2Time, vl2Color, vl2StyleText, vl2Width)
+
+// ============================================================================
+// Tool: 区间背景 (Draw Sessions)
+// ============================================================================
+f_region_draw(enabled, sessionText, regionName, bgColor) =>
+    startHour = f_start_hour(sessionText)
+    startMinute = f_start_minute(sessionText)
+    startTime = f_ts(time, startHour, startMinute)
+    inSession = not na(time("", sessionText, toolboxTimezone))
+    sessionStarts = inSession and not inSession[1]
+    if enabled and sessionStarts
+        if str.length(regionName) > 0
+            label.new(startTime, regionLabelY, regionName, xloc=xloc.bar_time, style=label.style_label_down, color=color.new(bgColor, 0), textcolor=color.white, size=size.tiny)
+f_region_bg(enabled, sessionText, bgColor) =>
+    enabled and not na(time("", sessionText, toolboxTimezone)) ? bgColor : na
+f_region_update_future(existingBox, existingLabel, enabled, sessionText, regionName, bgColor) =>
+    box resultBox = existingBox
+    label resultLabel = existingLabel
+    startHour = f_start_hour(sessionText)
+    startMinute = f_start_minute(sessionText)
+    endHour = f_end_hour(sessionText)
+    endMinute = f_end_minute(sessionText)
+    nextStart = f_next_time(startHour, startMinute)
+    nextEnd = f_region_end(nextStart, nextStart, endHour, endMinute)
+    if enabled and regionShowNext
+        if na(resultBox)
+            resultBox := box.new(nextStart, regionTop, nextEnd, regionBottom, xloc=xloc.bar_time, bgcolor=bgColor, border_color=color.new(bgColor, 100))
+        else
+            box.set_left(resultBox, nextStart)
+            box.set_right(resultBox, nextEnd)
+            box.set_top(resultBox, regionTop)
+            box.set_bottom(resultBox, regionBottom)
+            box.set_bgcolor(resultBox, bgColor)
+            box.set_border_color(resultBox, color.new(bgColor, 100))
+        if str.length(regionName) > 0
+            if na(resultLabel)
+                resultLabel := label.new(nextStart, regionLabelY, regionName, xloc=xloc.bar_time, style=label.style_label_down, color=color.new(bgColor, 0), textcolor=color.white, size=size.tiny)
+            else
+                label.set_x(resultLabel, nextStart)
+                label.set_y(resultLabel, regionLabelY)
+                label.set_text(resultLabel, regionName)
+                label.set_color(resultLabel, color.new(bgColor, 0))
+                label.set_textcolor(resultLabel, color.white)
+        else
+            if not na(resultLabel)
+                label.delete(resultLabel)
+                resultLabel := na
+    else
+        if not na(resultBox)
+            box.delete(resultBox)
+            resultBox := na
+        if not na(resultLabel)
+            label.delete(resultLabel)
+            resultLabel := na
+    [resultBox, resultLabel]
+f_region_draw(region1On, region1Session, region1Name, region1Color)
+f_region_draw(region2On, region2Session, region2Name, region2Color)
+f_region_draw(region3On, region3Session, region3Name, region3Color)
+f_region_draw(region4On, region4Session, region4Name, region4Color)
+bgcolor(f_region_bg(region1On, region1Session, region1Color))
+bgcolor(f_region_bg(region2On, region2Session, region2Color))
+bgcolor(f_region_bg(region3On, region3Session, region3Color))
+bgcolor(f_region_bg(region4On, region4Session, region4Color))
+var box futureRegion1 = na
+var box futureRegion2 = na
+var box futureRegion3 = na
+var box futureRegion4 = na
+var label futureRegionLabel1 = na
+var label futureRegionLabel2 = na
+var label futureRegionLabel3 = na
+var label futureRegionLabel4 = na
+if barstate.islast
+    [updatedRegion1, updatedRegionLabel1] = f_region_update_future(futureRegion1, futureRegionLabel1, region1On, region1Session, region1Name, region1Color)
+    futureRegion1 := updatedRegion1
+    futureRegionLabel1 := updatedRegionLabel1
+    [updatedRegion2, updatedRegionLabel2] = f_region_update_future(futureRegion2, futureRegionLabel2, region2On, region2Session, region2Name, region2Color)
+    futureRegion2 := updatedRegion2
+    futureRegionLabel2 := updatedRegionLabel2
+    [updatedRegion3, updatedRegionLabel3] = f_region_update_future(futureRegion3, futureRegionLabel3, region3On, region3Session, region3Name, region3Color)
+    futureRegion3 := updatedRegion3
+    futureRegionLabel3 := updatedRegionLabel3
+    [updatedRegion4, updatedRegionLabel4] = f_region_update_future(futureRegion4, futureRegionLabel4, region4On, region4Session, region4Name, region4Color)
+    futureRegion4 := updatedRegion4
+    futureRegionLabel4 := updatedRegionLabel4

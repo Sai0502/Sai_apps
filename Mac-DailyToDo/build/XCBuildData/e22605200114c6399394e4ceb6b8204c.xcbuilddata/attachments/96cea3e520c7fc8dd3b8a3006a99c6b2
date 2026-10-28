@@ -1,0 +1,49 @@
+{
+  "" : {
+    "diagnostics" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/DailyCheckIn-primary.dia",
+    "emit-module-dependencies" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/DailyCheckIn-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/DailyCheckIn-primary-emit-module.dia",
+    "pch" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/DailyCheckIn-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/DailyCheckIn-primary.swiftdeps"
+  },
+  "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/DailyCheckIn/CheckItem.swift" : {
+    "const-values" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/CheckItem.swiftconstvalues",
+    "dependencies" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/CheckItem.d",
+    "diagnostics" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/CheckItem.dia",
+    "index-unit-output-path" : "/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/CheckItem.o",
+    "llvm-bc" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/CheckItem.bc",
+    "object" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/CheckItem.o",
+    "swift-dependencies" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/CheckItem.swiftdeps",
+    "swiftmodule" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/CheckItem~partial.swiftmodule"
+  },
+  "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/DailyCheckIn/ContentView.swift" : {
+    "const-values" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/ContentView.swiftconstvalues",
+    "dependencies" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/ContentView.d",
+    "diagnostics" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/ContentView.dia",
+    "index-unit-output-path" : "/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/ContentView.o",
+    "llvm-bc" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/ContentView.bc",
+    "object" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/ContentView.o",
+    "swift-dependencies" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/ContentView.swiftdeps",
+    "swiftmodule" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/ContentView~partial.swiftmodule"
+  },
+  "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/DailyCheckIn/DailyCheckInApp.swift" : {
+    "const-values" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/DailyCheckInApp.swiftconstvalues",
+    "dependencies" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/DailyCheckInApp.d",
+    "diagnostics" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/DailyCheckInApp.dia",
+    "index-unit-output-path" : "/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/DailyCheckInApp.o",
+    "llvm-bc" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/DailyCheckInApp.bc",
+    "object" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/DailyCheckInApp.o",
+    "swift-dependencies" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/DailyCheckInApp.swiftdeps",
+    "swiftmodule" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/DailyCheckInApp~partial.swiftmodule"
+  },
+  "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
+    "index-unit-output-path" : "/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps",
+    "swiftmodule" : "/Users/sai/Downloads/Sai_Apps/StickyNotes/DailyCheckIn/build/DailyCheckIn.build/Debug-iphoneos/DailyCheckIn.build/Objects-normal/arm64/GeneratedAssetSymbols~partial.swiftmodule"
+  }
+}
