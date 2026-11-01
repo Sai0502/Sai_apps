@@ -50,8 +50,9 @@ MAX_SEGMENT_LENGTH = 500  # 设置每个文本段的最大长度
 SEGMENT_TIMEOUT_SECONDS = 60
 ROUND_RETRY_DELAYS = (5, 15)
 
-# Surge 的代理端口 8234， Clash Verge 的代理端口 7897
-EDGE_TTS_PROXY = "http://127.0.0.1:7897"
+# Surge 的代理端口 8234，Clash Verge 的代理端口 7897。
+# 可通过环境变量覆盖；设置为空字符串即可直连。
+EDGE_TTS_PROXY = os.environ.get("EDGE_TTS_PROXY", "http://127.0.0.1:7897").strip()
 
 SETTINGS_ORGANIZATION = "Sai"
 SETTINGS_APPLICATION = "TTS UI"
@@ -141,7 +142,10 @@ async def process_segment(
             _stream_segment(segment, voice), timeout=float(timeout)
         )
     except Exception as exc:
-        message = f"segment failed: {segment[:40]!r}: {exc}"
+        message = (
+            f"segment failed: {segment[:40]!r}: "
+            f"{type(exc).__name__}: {exc}"
+        )
         if logger:
             logger.warning(message)
         else:
@@ -386,6 +390,18 @@ async def run_tts(task_state, progress_callback=None):
                 len(remaining),
             )
             if remaining:
+                max_rounds = 1 + len(ROUND_RETRY_DELAYS)
+                if session_round >= max_rounds:
+                    message = (
+                        f"连续 {session_round} 轮生成失败，仍有 "
+                        f"{len(remaining)}/{task_state.total} 段未完成；"
+                        "详细原因请查看 task.log。"
+                    )
+                    logger.error(message)
+                    persist_task_state(task_state, "error", RuntimeError(message))
+                    return task_result(
+                        task_state, "error", rounds_run, message
+                    )
                 delay = ROUND_RETRY_DELAYS[
                     min(session_round - 1, len(ROUND_RETRY_DELAYS) - 1)
                 ]
