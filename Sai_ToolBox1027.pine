@@ -5,6 +5,7 @@ indicator("Sai_ToolBox1027", overlay=true, max_lines_count=500, max_labels_count
 // ============================================================================
 groupTimezone = "时区"
 groupKeyPoints = "重要点位"
+groupAlerts = "触碰提醒"
 groupLines = "任意竖线"
 groupRegions = "区间背景"
 utcOffset = input.int(-4, "UTC (+/-)", minval=-12, maxval=14, group=groupTimezone)
@@ -22,6 +23,11 @@ showEhEl = input.bool(true, "欧盘高/低点", group=groupKeyPoints, tooltip="�
 ehColor = input.color(color.rgb(168, 85, 247), "EH", group=groupKeyPoints, inline="kp_ehel")
 elColor = input.color(color.rgb(6, 182, 212), "EL", group=groupKeyPoints, inline="kp_ehel")
 showLevelTime = input.bool(true, "点位标签显示时间", group=groupKeyPoints, tooltip="在 AH/AL/EH/EL 标签后显示点位形成时间")
+// --- 触碰提醒：美东 00:00-09:30 内触及亚盘 AH/AL 时提醒 ---
+alertAhOn = input.bool(true, "AH 触碰提醒", group=groupAlerts, tooltip="美东时间窗口内，某根 bar 的 high 触及亚盘高点 AH 时提醒一次", inline="al_ah")
+alertAlOn = input.bool(true, "AL 触碰提醒", group=groupAlerts, tooltip="美东时间窗口内，某根 bar 的 low 触及亚盘低点 AL 时提醒一次", inline="al_ah")
+alertStartTime = input.string("00:00", "窗口开始(美东)", group=groupAlerts, inline="al_win")
+alertEndTime = input.string("09:30", "窗口结束(美东)", group=groupAlerts, inline="al_win")
 // --- 重要点位：午夜开盘价（MO）---
 showMo = input.bool(true, "午夜开盘价", group=groupKeyPoints, tooltip="美东 0:00", inline="kp_mo")
 moColor = input.color(color.rgb(35, 39, 50), "MO", group=groupKeyPoints, inline="kp_mo")
@@ -251,6 +257,27 @@ ahLabel := updatedAhLabel
 [updatedAlLine, updatedAlLabel] = f_level_update(alLine, alLabel, showAhAl, asianLow, alStartBar, alText, alColor)
 alLine := updatedAlLine
 alLabel := updatedAlLabel
+
+// --- 触碰提醒：美东窗口内触及 AH / AL ---
+// 盘中触及定义：bar 的 high >= AH 或 low <= AL
+// 每亚盘周期每边只提醒一次：下个亚盘开始时重置标记
+alertStartMin = (f_valid_point_time(alertStartTime) ? f_point_hour(alertStartTime) * 60 + f_point_minute(alertStartTime) : 0)
+alertEndMin = (f_valid_point_time(alertEndTime) ? f_point_hour(alertEndTime) * 60 + f_point_minute(alertEndTime) : 570)
+nowEtMin = hour(time, nyTimezone) * 60 + minute(time, nyTimezone)
+inAlertWindow = nowEtMin >= alertStartMin and nowEtMin < alertEndMin
+var bool ahAlerted = false
+var bool alAlerted = false
+if asianStarts
+    ahAlerted := false
+    alAlerted := false
+ahTouch = alertAhOn and inAlertWindow and not na(asianHigh) and high >= asianHigh and not ahAlerted
+alTouch = alertAlOn and inAlertWindow and not na(asianLow) and low <= asianLow and not alAlerted
+if ahTouch
+    ahAlerted := true
+    alert("AH 触碰：价格触及亚盘高点 " + str.tostring(asianHigh) + "（美东 " + f_et_time_str(time) + "）", alert.freq_once_per_bar_close)
+if alTouch
+    alAlerted := true
+    alert("AL 触碰：价格触及亚盘低点 " + str.tostring(asianLow) + "（美东 " + f_et_time_str(time) + "）", alert.freq_once_per_bar_close)
 
 // ============================================================================
 // Tool: 重要点位 - 欧盘高/低点 (EH / EL)

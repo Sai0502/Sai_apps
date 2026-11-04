@@ -9,15 +9,15 @@ struct HomeView: View {
     @State private var showAdd = false
     @State private var editingTask: TaskItem?
 
-    private let pullLimit: CGFloat = 100
+    private let pullLimit: CGFloat = 80
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 searchField
                 ScrollView {
-                    VStack(spacing: 0) {
-                        orangePullArea
+                    orangePullArea
+                    LazyVStack(spacing: 0) {
                         taskList
                     }
                 }
@@ -65,7 +65,7 @@ struct HomeView: View {
             if pullOffset > 0 {
                 Color(red: 1.0, green: 0.5, blue: 0.15)
             }
-            if pullOffset > 40 {
+            if pullOffset > 70 {
                 Text("松开新增任务")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.white)
@@ -126,10 +126,14 @@ struct HomeView: View {
                     return
                 }
                 let h = max(0, v.translation.height)
-                pullOffset = min(h, 140)
+                // 阻尼：手指移动 2.5pt，橘色框只展开 1pt，增加粘滞感，不容易误触
+                let damped = h * 0.4
+                pullOffset = min(damped, 160)
             }
-            .onEnded { _ in
-                if pullOffset >= pullLimit {
+            .onEnded { v in
+                // 松手时速度很快 -> 是快速滚动的惯性，不是有意下拉，不触发新增
+                let isFastSwipe = v.velocity.height > 400
+                if pullOffset >= pullLimit && !isFastSwipe {
                     showAdd = true
                 }
                 withAnimation(.spring(duration: 0.22)) {
@@ -218,7 +222,7 @@ struct SwipeableTaskRow: View {
             TaskRow(task: task, onToggle: onToggle, onEdit: onEdit)
                 .background(bgColor)
                 .offset(x: offset)
-                .gesture(
+                .simultaneousGesture(
                     DragGesture(minimumDistance: 8)
                         .onChanged { v in
                             // 只跟随水平位移；最多把删除区完全拉出再多 80pt

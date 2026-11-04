@@ -3,7 +3,7 @@ import SwiftData
 import UIKit
 
 /// 主界面：单页时间线，每天一张卡片（日期行 + 项目），最新一天在最上方。
-/// 项目通过右上角加号新增（弹窗填项目名 + 每行组数 1-5，第一行即按组数生成方形勾选框）；
+/// 项目通过顶部下拉新增（弹窗填项目名 + 每行组数 1-5，第一行即按组数生成方形勾选框）；
 /// 点击勾选框打卡；长按任意行复制下一行（新行按该项目组数、勾选全空）；
 /// 第 1 行不可删、第 2 行起左滑出现删除按钮点击删除；
 /// 单击项目标题改名、左滑出现删除按钮点击删除；
@@ -115,18 +115,19 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if projects.isEmpty && gapItems.isEmpty {
-                    emptyState
-                } else {
-                    dayList
-                }
+                dayList
             }
             .navigationTitle("细狗翻身仗")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: addProject) {
-                        Image(systemName: "plus.circle.fill")
+                    Button {
+                        editingProject = nil
+                        editText = ""
+                        editBoxCount = ""
+                        showEditSheet = true
+                    } label: {
+                        Image(systemName: "plus")
                     }
                 }
             }
@@ -168,26 +169,24 @@ struct ContentView: View {
     }
 
     private var dayList: some View {
-        List {
-            ForEach(timeline) { item in
-                switch item {
-                case .day(let block):
-                    dayCard(for: block, isToday: calendar.isDate(block.day, inSameDayAs: simulatedToday))
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                case .gap(let gap):
-                    gapBanner(missingDays: gap.missingDays)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                if projects.isEmpty && gapItems.isEmpty {
+                    emptyState
+                        .frame(maxWidth: .infinity, minHeight: 320)
+                } else {
+                    ForEach(timeline) { item in
+                        switch item {
+                        case .day(let block):
+                            dayCard(for: block, isToday: calendar.isDate(block.day, inSameDayAs: simulatedToday))
+                        case .gap(let gap):
+                            gapBanner(missingDays: gap.missingDays)
+                        }
+                    }
                 }
             }
         }
-        .listStyle(.plain)
-        .listSectionSeparator(.hidden)
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
-        .scrollContentBackground(.hidden)
         // 点击列表任意位置：所有行收起左滑删除条
         .simultaneousGesture(
             TapGesture().onEnded { collapseTick += 1 }
@@ -201,7 +200,7 @@ struct ContentView: View {
                 .foregroundStyle(Color.secondary)
             Text("还没有项目")
                 .font(.headline)
-            Text("点右上角 + 添加第一个项目")
+            Text("下拉屏幕添加新任务")
                 .font(.subheadline)
                 .foregroundStyle(Color.secondary)
         }
@@ -356,14 +355,7 @@ struct ContentView: View {
         ensureTodayItems()
     }
 
-    /// 右上角 + ：新增项目（弹窗填项目名 + 每行组数，排到当天最后）
-    private func addProject() {
-        editingProject = nil
-        editText = ""
-        editBoxCount = ""
-        showEditSheet = true
-    }
-
+    /// 新增项目（弹窗填项目名 + 每行组数，排到当天最后）：由顶部下拉触发
     private func saveProject() {
         let trimmed = editText.trimmingCharacters(in: .whitespacesAndNewlines)
         // 每行组数：解析 1-5 并钳制；非法输入时——改名保持原组数，新增回退 5
@@ -694,6 +686,9 @@ struct ContentView: View {
         let onCancel: () -> Void
         let onSave: () -> Void
 
+        /// 新增时自动聚焦「项目名称」，键盘随之弹出
+        @FocusState private var nameFocused: Bool
+
         private var trimmedName: String {
             name.trimmingCharacters(in: .whitespacesAndNewlines)
         }
@@ -720,6 +715,7 @@ struct ContentView: View {
 
                         fieldLabel("项目名称")
                         TextField("例：俯卧撑×10", text: $name)
+                            .focused($nameFocused)
                             .font(.system(size: 16))
                             .padding(10)
                             .background(Color(.systemGray6))
@@ -776,6 +772,14 @@ struct ContentView: View {
                     .shadow(color: Color.black.opacity(0.2), radius: 16, y: 6)
 
                     Spacer()
+                }
+            }
+            // 新增时自动聚焦「项目名称」：先重置再聚焦，确保每次弹窗（含连续第二次）都稳定弹出键盘
+            .task {
+                if isNew {
+                    nameFocused = false
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    nameFocused = true
                 }
             }
         }

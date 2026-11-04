@@ -32,8 +32,9 @@ struct ToggleTaskIntent: AppIntent {
 
         // 交互式小组件里 reloadTimelines 有时会被系统合并/丢弃（表现为：点了没删除线、5 秒也不消失）。
         // 这里先立刻刷一次，再等一拍补刷一次，让扩展进程在这段时间内保持存活以提高命中率。
+        // 等待从 400ms 缩到 150ms：缩短点击到勾选的可感知延迟（5 秒消失由时间线预埋条目兜底）。
         WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
-        try? await Task.sleep(for: .milliseconds(400))
+        try? await Task.sleep(for: .milliseconds(150))
         WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
 
         return .result()

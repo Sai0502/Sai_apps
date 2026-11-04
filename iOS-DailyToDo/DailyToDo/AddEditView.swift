@@ -88,7 +88,7 @@ struct AddEditView: View {
         TextField("任务内容", text: $title, axis: .vertical)
             .font(.system(size: 17))
             .foregroundColor(.white)
-            .lineLimit(1...6)
+            .lineLimit(2...6)
             .focused($titleFocused)
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
