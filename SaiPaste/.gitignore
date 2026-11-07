@@ -1,0 +1,14 @@
+.DS_Store
+.build/
+.swiftpm/
+*.xcodeproj
+*.xcuserstate
+DerivedData/
+
+packaging/*.dmg
+packaging/*.zip
+
+*.log
+
+packaging/*.pkg
+packaging/*.provisionprofile
