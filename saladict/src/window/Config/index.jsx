@@ -1,0 +1,102 @@
+import { useLocation, useRoutes } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { appWindow } from '@tauri-apps/api/window';
+import { Card, Divider } from '@nextui-org/react';
+import { useTranslation } from 'react-i18next';
+
+import WindowControl from '../../components/WindowControl';
+import SideBar from './components/SideBar';
+import { osType } from '../../utils/env';
+import { useConfig } from '../../hooks';
+import routes from './routes';
+import { UserButton } from '@daveyplate/better-auth-ui';
+import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
+import { MdCreditCard, MdSettingsSuggest } from 'react-icons/md';
+import { AiFillCloud } from 'react-icons/ai';
+import './style.css';
+
+export default function Config() {
+    const [transparent] = useConfig('transparent', true);
+    const { t } = useTranslation();
+    const location = useLocation();
+    const page = useRoutes(routes);
+
+    useEffect(() => {
+        if (appWindow.label === 'config') {
+            appWindow.show();
+        }
+    }, []);
+
+    return (
+        <>
+            <Card
+                shadow='none'
+                className={`${
+                    transparent ? 'bg-background/90' : 'bg-content1'
+                } float-left w-[230px] h-screen rounded-none border-r-1 border-default-100 select-none cursor-default`}
+            >
+                <div className='h-[45px] p-[5px] flex justify-between items-center'>
+                    <div
+                        className='h-full w-full'
+                        data-tauri-drag-region='true'
+                    />
+                    <UserButton
+                        size='icon'
+                        additionalLinks={[
+                            {
+                                href: `${import.meta.env.VITE_BASE_URL}/docs/faq/howtosociallogin.html`,
+                                label: t('config.account.how_to_social_login'),
+                                icon: <HiOutlineQuestionMarkCircle />,
+                                signedIn: false,
+                            },
+                            {
+                                href: `${import.meta.env.VITE_API_BASE_URL}/pricing`,
+                                label: t('config.account.view_credits_plans'),
+                                icon: <MdCreditCard />,
+                                signedIn: true,
+                            },
+                            {
+                                href: `${import.meta.env.VITE_API_BASE_URL}/settings/billing`,
+                                label: t('config.account.manager_subscriptions'),
+                                icon: <MdSettingsSuggest />,
+                                signedIn: true,
+                            },
+                            {
+                                href: `${import.meta.env.VITE_API_BASE_URL}/settings/credits`,
+                                label: t('config.account.manager_credits'),
+                                icon: <AiFillCloud />,
+                                signedIn: true,
+                            },
+                        ]}
+                    />
+                </div>
+                <div data-tauri-drag-region='true'>
+                    <img
+                        alt='pot logo'
+                        src='/icon.svg'
+                        className='h-[60px] w-[60px] m-auto mb-[20px]'
+                        draggable={false}
+                    />
+                </div>
+                <SideBar />
+            </Card>
+            <div className='bg-background ml-[230px] h-screen select-none cursor-default'>
+                <div
+                    data-tauri-drag-region='true'
+                    className='top-[5px] left-[235px] right-[5px] h-[30px] fixed'
+                />
+                <div className='h-[35px] flex justify-between'>
+                    <div className='flex'>
+                        <h2 className='m-auto ml-[10px]'>{t(`config.${location.pathname.slice(1)}.title`)}</h2>
+                    </div>
+
+                    <div className='flex'>{osType !== 'Darwin' && <WindowControl />}</div>
+                </div>
+                <Divider />
+                <div className='p-[10px] overflow-y-auto h-[calc(100vh-36px)]'>
+                    {page}
+                </div>
+            </div>
+        </>
+    );
+}
