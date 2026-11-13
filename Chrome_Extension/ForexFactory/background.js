@@ -1,7 +1,14 @@
 const CACHE_PREFIX = "weekly-news:";
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 const PARTIAL_CACHE_TTL_MS = 15 * 60 * 1000;
+const CACHE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 const PARTIAL_EVENT_THRESHOLD = 4;
+const DEFAULT_SETTINGS = {
+  includeEUR: false,
+  autoOpen: true,
+  cacheHours: 4,
+  useLocalTime: true
+};
 const BUILD_LABEL = "ForexFactory 金融信息 v1004_1915";
 const DEFAULT_CURRENCIES = new Set(["USD"]);
 const DEFAULT_IMPACTS = new Set(["High", "Medium"]);
@@ -97,13 +104,14 @@ const MANUAL_MARKET_SCHEDULE_RULES = [
   }
 ];
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async (details) => {
+  // 仅首次安装时补默认值；版本更新不能覆盖用户已有设置。
+  if (details && details.reason && details.reason !== "install") {
+    return;
+  }
+  const stored = await chrome.storage.local.get("ffwo_settings");
   await chrome.storage.local.set({
-    ffwo_settings: {
-      includeEUR: false,
-      cacheHours: 4,
-      useLocalTime: true
-    }
+    ffwo_settings: Object.assign({}, DEFAULT_SETTINGS, stored.ffwo_settings || {})
   });
 });
 
@@ -208,6 +216,7 @@ async function handleGetOverlayData(options = {}) {
       debug
     }
   });
+  await pruneWeeklyCaches(cacheKey, now);
 
   const payload = buildWeeklyPayload(anchor, settings, fetched.parsed, debug);
   return {
@@ -225,6 +234,25 @@ async function handleGetOverlayData(options = {}) {
   };
 }
 
+// 清掉过期的周缓存，避免 storage.local 随周数无限累积。
+async function pruneWeeklyCaches(keepKey, now = Date.now()) {
+  try {
+    const all = await chrome.storage.local.get(null);
+    const staleKeys = Object.keys(all).filter((key) => {
+      if (key === keepKey || !key.startsWith(CACHE_PREFIX)) {
+        return false;
+      }
+      const fetchedAt = all[key] && Number(all[key].fetchedAt);
+      return !fetchedAt || now - fetchedAt > CACHE_MAX_AGE_MS;
+    });
+    if (staleKeys.length) {
+      await chrome.storage.local.remove(staleKeys);
+    }
+  } catch (_) {
+    // 清理失败不影响主流程
+  }
+}
+
 // 向 popup 广播获取进度状态（获取完即清空，不持久化）
 async function broadcastFetchStatus(text) {
   try {
@@ -236,15 +264,7 @@ async function broadcastFetchStatus(text) {
 
 async function getSettings() {
   const stored = await chrome.storage.local.get("ffwo_settings");
-  return Object.assign(
-    {
-      includeEUR: false,
-      autoOpen: true,
-      cacheHours: 4,
-      useLocalTime: true
-    },
-    stored.ffwo_settings || {}
-  );
+  return Object.assign({}, DEFAULT_SETTINGS, stored.ffwo_settings || {});
 }
 
 function getTargetAnchorDate(now = new Date()) {
@@ -493,22 +513,41 @@ function applyUiSettings(payload, settings) {
   });
 }
 
-function waitForTabComplete(tabId, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
-      reject(new Error("Timed out waiting for Forex Factory page to load."));
-    }, timeoutMs);
+async function waitForTabComplete(tabId, timeoutMs) {
+  // 页面可能在挂监听之前就已经加载完成，先查一次当前状态，避免白等超时。
+  const current = await chrome.tabs.get(tabId).catch(() => null);
+  if (current && current.status === "complete") {
+    return;
+  }
 
-    const listener = (updatedTabId, changeInfo) => {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (settle, value) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
+      settle(value);
+    };
+    const timer = setTimeout(() => {
+      finish(reject, new Error("Timed out waiting for Forex Factory page to load."));
+    }, timeoutMs);
+    const onUpdated = (updatedTabId, changeInfo) => {
       if (updatedTabId === tabId && changeInfo.status === "complete") {
-        clearTimeout(timeout);
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
+        finish(resolve);
+      }
+    };
+    const onRemoved = (removedTabId) => {
+      if (removedTabId === tabId) {
+        finish(reject, new Error("Forex Factory tab was closed before loading finished."));
       }
     };
 
-    chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.onRemoved.addListener(onRemoved);
   });
 }
 

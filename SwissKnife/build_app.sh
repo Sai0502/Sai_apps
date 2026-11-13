@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_DIR="$ROOT_DIR/build/SwissKnife.app"
+APP_DIR="$ROOT_DIR/SwissKnife.app"
 EXECUTABLE_PATH="$ROOT_DIR/.build/release/SwissKnife"
 
 cd "$ROOT_DIR"

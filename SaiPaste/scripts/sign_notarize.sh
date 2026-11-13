@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION="${VERSION:-1.0.0}"
-APP="packaging/SaiPaste.app"
+APP="SaiPaste.app"
 DMG="packaging/SaiPaste-$VERSION.dmg"
 ENTITLEMENTS="packaging/SaiPaste.entitlements"
 

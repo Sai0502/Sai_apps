@@ -14,9 +14,7 @@
   "host_permissions": [
     "https://trader.tradovate.com/*",
     "https://topstepx.com/*",
-    "https://*.topstepx.com/*",
-    "https://app.tradesea.ai/*",
-    "https://*.tradesea.ai/*"
+    "https://*.topstepx.com/*"
   ],
   "action": {
     "default_title": "TradingAutoLock",
@@ -62,10 +60,11 @@
         "https://trader.tradovate.com/*"
       ],
       "js": [
-        "hotkey-inject.js"
+        "hotkey-hook.js"
       ],
       "run_at": "document_start",
-      "all_frames": true
+      "all_frames": true,
+      "world": "MAIN"
     },
     {
       "matches": [
@@ -83,16 +82,6 @@
       ],
       "js": [
         "topstep-content.js"
-      ],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://app.tradesea.ai/*",
-        "https://*.tradesea.ai/*"
-      ],
-      "js": [
-        "tradesea-content.js"
       ],
       "run_at": "document_idle"
     }

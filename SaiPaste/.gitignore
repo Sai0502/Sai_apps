@@ -5,6 +5,7 @@
 *.xcuserstate
 DerivedData/
 
+SaiPaste.app/
 packaging/*.dmg
 packaging/*.zip
 

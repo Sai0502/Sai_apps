@@ -25,7 +25,7 @@ enum WindowManager {
     static func showSettingsWindow() {
         let w = ensureSettingsWindow()
         w.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateBestEffort()
     }
 
     // MARK: - 休息全屏遮罩（覆盖所有 APP，含已全屏的）
@@ -50,7 +50,7 @@ enum WindowManager {
         }
         // 注意：borderless 窗口不能成为 main window（makeMain() 会抛
         // NSInternalInconsistencyException 并中断 timer 链），故只保持 key window。
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateBestEffort()
     }
 
     static var isBreakOverlayVisible: Bool { !breakOverlayWindows.isEmpty }

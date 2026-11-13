@@ -38,9 +38,13 @@ final class StickyNotesModule: NSObject {
         line.isEnabled = false
         menu.addItem(line)
 
-        menu.addItem(NSMenuItem(title: "    新文字便签", action: #selector(newNote), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "    历史便签", action: #selector(showHistory), keyEquivalent: ""))
-        menu.items.suffix(2).forEach { $0.target = self }
+        let newItem = NSMenuItem(title: "    新文字便签", action: #selector(newNote), keyEquivalent: "")
+        newItem.target = self
+        menu.addItem(newItem)
+
+        let historyItem = NSMenuItem(title: "    历史便签", action: #selector(showHistory), keyEquivalent: "")
+        historyItem.target = self
+        menu.addItem(historyItem)
     }
 
     // MARK: - 调试快照
@@ -54,10 +58,6 @@ final class StickyNotesModule: NSObject {
     // MARK: - 便签管理
 
     @objc private func newNote() { createNote() }
-
-    /// 供壳/宿主调用的公开入口
-    func newNoteFromMenu() { createNote() }
-    func showHistoryFromMenu() { showHistory() }
 
     @discardableResult
     func createNote(text: String = "", theme: NoteTheme? = nil,
@@ -121,7 +121,7 @@ final class StickyNotesModule: NSObject {
     // MARK: - 历史便签
 
     @objc func showHistory() {
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateBestEffort()
         if historyWindow == nil {
             let view = HistoryView(store: NoteStore.shared) { [weak self] item in
                 self?.restore(item)

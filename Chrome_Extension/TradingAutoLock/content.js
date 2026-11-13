@@ -1,6 +1,6 @@
 (function () {
-const SCRIPT_VERSION = '2026-09-23-unified-custom-time-v33';
-const SCRIPT_BUILD_LABEL = 'TradingAutoLock-TDV v1024_1244';
+const SCRIPT_VERSION = '2026-11-11-diagnostics-v36';
+const SCRIPT_BUILD_LABEL = 'TradingAutoLock-TDV v1111_1134';
 if (window.__tradovateAutoLockLoaded === SCRIPT_VERSION) return;
 window.__tradovateAutoLockLoaded = SCRIPT_VERSION;
 
@@ -43,6 +43,9 @@ const LOCK_PROMPT_RETRY_INTERVAL_MS = 1500;
 const LOCK_PROMPT_MAX_RETRIES = 40;
 const AUTO_LOCK_MAX_CONSECUTIVE_FAILURES = 3;
 const AUTO_LOCK_COOLDOWN_MS = 30 * 60 * 1000;
+const HOTKEY_DEBUG_REQUEST_TYPE = 'tradovate-auto-lock:hotkey-debug-request';
+const HOTKEY_DEBUG_RESPONSE_TYPE = 'tradovate-auto-lock:hotkey-debug-response';
+let hotkeyDebugRequestSeq = 0;
 
 function pushRuntimeDiagnostic(type, details = {}) {
   try {
@@ -1006,6 +1009,34 @@ async function readCurrentPageState() {
   };
 }
 
+function requestHotkeyDebug(timeoutMs = 600) {
+  return new Promise(resolve => {
+    const requestId = `hotkey-${Date.now()}-${++hotkeyDebugRequestSeq}`;
+    let settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener('message', onMessage);
+      window.clearTimeout(timer);
+      resolve(value);
+    };
+    const onMessage = event => {
+      if (!event.data || event.data.source !== HOTKEY_DEBUG_RESPONSE_TYPE) return;
+      if (event.data.requestId !== requestId) return;
+      finish(event.data);
+    };
+    const timer = window.setTimeout(() => {
+      finish({ ok: false, timeout: true, requestId, error: 'hotkey debug response timeout' });
+    }, timeoutMs);
+    window.addEventListener('message', onMessage);
+    try {
+      window.postMessage({ source: HOTKEY_DEBUG_REQUEST_TYPE, requestId }, '*');
+    } catch (err) {
+      finish({ ok: false, error: err && err.message ? err.message : String(err), requestId });
+    }
+  });
+}
+
 async function buildDiagnosticBundle() {
   const accountId = extractTradovateAccountId();
   const settingsKey = settingsLockStorageKey(accountId);
@@ -1020,13 +1051,20 @@ async function buildDiagnosticBundle() {
     [overlayKey]: null,
     [autoKey]: null,
     [WS_CAPTURE_STORAGE_KEY]: null,
-    [DEBUG_LOG_KEY]: []
+    [DEBUG_LOG_KEY]: [],
+    tdvHotkeyMap: null
   });
   let pnlExtraction = null;
   try {
     pnlExtraction = await extractTradovatePnl();
   } catch (err) {
     pnlExtraction = { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+  let hotkeyDebug = null;
+  try {
+    hotkeyDebug = await requestHotkeyDebug(600);
+  } catch (err) {
+    hotkeyDebug = { ok: false, error: err && err.message ? err.message : String(err) };
   }
 
   return {
@@ -1036,7 +1074,7 @@ async function buildDiagnosticBundle() {
     limitations: [
       'Chrome extensions cannot read DevTools console history directly after the fact.',
       'Network details are based on PerformanceResourceTiming summaries, not full request/response bodies.',
-      'Page JavaScript globals from the main world may be inaccessible from the isolated content script.'
+      'Page globals are read through the MAIN-world hotkey hook; other page internals may still be inaccessible.'
     ],
     page: {
       url: location.href,
@@ -1057,6 +1095,7 @@ async function buildDiagnosticBundle() {
     websocketCapture: storageData[WS_CAPTURE_STORAGE_KEY] || null,
     pageStructure: collectPageStructureDiagnostics(),
     pnlExtraction,
+    hotkey: hotkeyDebug,
     domDiagnostics: collectPnlDomDiagnostics(),
     runtimeDiagnosticEvents: runtimeDiagnosticEvents.slice(-120),
     debugSnapshot: await buildDebugSnapshot(),
@@ -1066,6 +1105,7 @@ async function buildDiagnosticBundle() {
       runtimeState: storageData[runtimeKey] || null,
       overlayState: storageData[overlayKey] || null,
       autoState: storageData[autoKey] || null,
+      tdvHotkeyMap: storageData.tdvHotkeyMap || null,
       debugLogTail: Array.isArray(storageData[DEBUG_LOG_KEY])
         ? storageData[DEBUG_LOG_KEY].slice(-80)
         : []
@@ -3902,7 +3942,7 @@ async function monitorScan({ manual = false } = {}) {
   }, result.accountId);
 
   try {
-    const lockResult = await executeRealLockout({ targetTime: '04:00' });
+    const lockResult = await executeRealLockout();
     await setAutoLockState({
       status: 'locked',
       lockKey,
@@ -4095,86 +4135,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
   } catch (_) {}
 })();
-
-// ---- 白天交易提醒弹窗（当地时间 6:00-21:00，每次打开页面弹出）----
-const DAYTIME_OVERLAY_ID = 'trading-autolock-daytime-overlay';
-let daytimeReminderClosedByUser = false;
-function showDaytimeReminder(force) {
-  const h = new Date().getHours();
-  if (h < 6 || h >= 21) return; // 仅本地时间 6:00-20:59 触发
-  if (daytimeReminderClosedByUser && !force) return;
-  if (document.getElementById(DAYTIME_OVERLAY_ID)) return;
-  const overlay = document.createElement('div');
-  overlay.id = DAYTIME_OVERLAY_ID;
-  overlay.innerHTML = [
-    '<div class="daytime-reminder-card" role="dialog" aria-live="assertive">',
-    '  <button class="daytime-reminder-close" type="button" aria-label="关闭">×</button>',
-    '  <div class="daytime-reminder-title">白天不要做单</div>',
-    '  <div class="daytime-reminder-line"></div>',
-    '  <div class="daytime-reminder-body">',
-    '    <div class="daytime-reminder-row"><span class="daytime-reminder-key">白天忍不住的根因：</span><span class="daytime-reminder-val">昨天亏了</span></div>',
-    '    <div class="daytime-reminder-row"><span class="daytime-reminder-key">白天不能做的根因：</span><span class="daytime-reminder-val">数据统计显示，白天做单刹不住车，80% 都是亏的</span></div>',
-    '    <div class="daytime-reminder-row"><span class="daytime-reminder-key">明知会亏还要做的根因：</span><span class="daytime-reminder-val">情绪，马上回本的焦虑情绪</span></div>',
-    '  </div>',
-    '</div>'
-  ].join('');
-  overlay.style.cssText = [
-    'position: fixed; inset: 0; z-index: 2147483646; display: grid; place-items: center;',
-    'padding: 5vh 4vw; background: rgba(0, 0, 0, 0.72);',
-    'color: #eef3f8; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;'
-  ].join(' ');
-  const style = document.createElement('style');
-  style.textContent = `
-    #${DAYTIME_OVERLAY_ID} .daytime-reminder-card {
-      box-sizing: border-box; position: relative;
-      width: min(92vw, 1320px);
-      display: grid; align-content: center; gap: clamp(27px, 3.9vh, 48px);
-      padding: clamp(42px, 7.5vw, 84px);
-      border: 1px solid rgba(125, 151, 184, 0.55);
-      border-radius: 27px; background: #101821;
-      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
-      text-align: center;
-    }
-    #${DAYTIME_OVERLAY_ID} .daytime-reminder-title {
-      color: #ff4d57; font-size: clamp(39px, 5.25vw, 66px);
-      line-height: 1.15; font-weight: 900;
-    }
-    #${DAYTIME_OVERLAY_ID} .daytime-reminder-line { height: 1px; background: rgba(126, 151, 183, 0.65); }
-    #${DAYTIME_OVERLAY_ID} .daytime-reminder-body {
-      display: flex; flex-direction: column; gap: clamp(15px, 2.4vh, 24px);
-      text-align: left;
-    }
-    #${DAYTIME_OVERLAY_ID} .daytime-reminder-row {
-      font-size: clamp(23px, 2.9vw, 32px); line-height: 1.55; color: #d6dde8;
-    }
-    #${DAYTIME_OVERLAY_ID} .daytime-reminder-key { color: #f0b429; font-weight: 700; }
-    #${DAYTIME_OVERLAY_ID} .daytime-reminder-close {
-      position: absolute; top: 24px; right: 27px; width: 57px; height: 57px;
-      border: 1px solid rgba(150, 167, 188, 0.45); border-radius: 999px;
-      background: rgba(255, 255, 255, 0.04); color: #b8c2d0;
-      cursor: pointer; font-size: 36px; line-height: 1;
-    }
-    #${DAYTIME_OVERLAY_ID} .daytime-reminder-close:hover { color: #ffffff; border-color: rgba(255, 255, 255, 0.72); }
-  `;
-  overlay.appendChild(style);
-  document.documentElement.appendChild(overlay);
-  overlay.querySelector('.daytime-reminder-close')?.addEventListener('click', () => { daytimeReminderClosedByUser = true; overlay.remove(); });
-}
-function armDaytimeReminder() {
-  const run = () => {
-    showDaytimeReminder();
-    // SPA 跳转可能清掉弹窗 DOM：1.2s 后若弹窗丢失且用户未关闭，补弹一次
-    setTimeout(() => {
-      if (!document.getElementById(DAYTIME_OVERLAY_ID)) showDaytimeReminder(true);
-    }, 1200);
-  };
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', run, { once: true });
-  } else {
-    run();
-  }
-}
-armDaytimeReminder();
 
 restoreLockoutOverlay().catch(err => {
   if (!isExtensionContextInvalidated(err)) console.warn('[TradovateAutoLock] failed to restore lockout overlay:', err);

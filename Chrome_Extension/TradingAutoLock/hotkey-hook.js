@@ -4,6 +4,9 @@
 (function () {
   const HOOK_FLAG = '__tradingAutoLockHotkeyHookInstalled';
   const CONFIG_TYPE = 'tradovate-auto-lock:hotkey-config';
+  const DEBUG_REQUEST_TYPE = 'tradovate-auto-lock:hotkey-debug-request';
+  const DEBUG_RESPONSE_TYPE = 'tradovate-auto-lock:hotkey-debug-response';
+  const HOOK_BUILD = 'v1111_1134';
   if (window[HOOK_FLAG]) return;
   window[HOOK_FLAG] = true;
 
@@ -22,6 +25,69 @@
   };
 
   let hotkeyMap = DEFAULT_MAP;
+  window.__tdvHotkeyMap = hotkeyMap;
+
+  // ---- 诊断缓冲（只留在内存，由 content.js 按需拉取）----
+
+  const hotkeyLogs = [];
+  const mainWorldErrors = [];
+  let configReceivedAt = null;
+
+  function truncateText(value, max) {
+    const text = String(value == null ? '' : value);
+    return text.length > max ? text.slice(0, max) + '…' : text;
+  }
+
+  function hotkeyLog(event, details = {}) {
+    try {
+      hotkeyLogs.push({
+        at: Date.now(),
+        time: new Date().toISOString(),
+        event,
+        details
+      });
+      while (hotkeyLogs.length > 200) hotkeyLogs.shift();
+    } catch (_) {
+    }
+  }
+
+  function recordMainWorldError(kind, details) {
+    try {
+      mainWorldErrors.push({
+        at: Date.now(),
+        time: new Date().toISOString(),
+        kind,
+        details
+      });
+      while (mainWorldErrors.length > 60) mainWorldErrors.shift();
+    } catch (_) {
+    }
+  }
+
+  window.addEventListener('error', function (event) {
+    recordMainWorldError('error', {
+      message: event.message || '',
+      source: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      stack: truncateText(event.error && event.error.stack ? event.error.stack : '', 4000)
+    });
+  }, true);
+
+  window.addEventListener('unhandledrejection', function (event) {
+    const reason = event.reason;
+    recordMainWorldError('unhandledrejection', {
+      message: reason && reason.message ? reason.message : String(reason || ''),
+      stack: truncateText(reason && reason.stack ? reason.stack : '', 4000)
+    });
+  }, true);
+
+  hotkeyLog('injected', {
+    build: HOOK_BUILD,
+    url: location.href,
+    frame: window.top === window.self ? 'top' : 'iframe',
+    readyState: document.readyState || ''
+  });
 
   // ---- 按键文本格式化 / 解析 ----
 
@@ -76,16 +142,15 @@
       const m = { arrowup: 'ArrowUp', arrowdown: 'ArrowDown', arrowleft: 'ArrowLeft', arrowright: 'ArrowRight' };
       return m[lower] || c;
     }
-    return c;
+    return null;
   }
 
   function keyNameFromEvent(e) {
+    // 优先用 e.code：不受键盘布局/输入法/Option 组合字符影响（Option+1 仍是 Digit1）
+    const fromCode = codeNameFromEvent(e);
+    if (fromCode) return fromCode;
     const k = e.key;
-    // 中文输入法活跃时（keyCode 229），空格/字母等 e.key 可能变成 'Process'/'Unidentified'，
-    // 此时改用 e.code 识别（空格恒为 Space，不受输入法影响）
-    if (!k || k === 'Dead' || k === 'Unidentified' || k === 'Process') {
-      return codeNameFromEvent(e);
-    }
+    if (!k || k === 'Dead' || k === 'Unidentified' || k === 'Process') return null;
     const lower = String(k).toLowerCase();
     if (lower === 'control' || lower === 'meta' || lower === 'alt' || lower === 'shift') return null; // 纯修饰键不算
     const mapped = SPECIAL_KEYS[lower];
@@ -177,11 +242,65 @@
     });
   }
 
-  // ---- 下单按钮查找与点击（不依赖页面快捷键） ----
-  // 拦截新键后直接查找并点击页面上的下单按钮（Buy/Sell/Close/平仓），
-  // 不依赖页面是否提供可被合成事件触发的快捷键，点击必然生效。
+  // ---- 原生快捷键合成 ----
+  // Tradovate 的 Hotkeys 模块只看 e.key / e.code / 修饰键，不检查 isTrusted，
+  // 所以合成 keydown 就能走它自己的下单逻辑（含 ATM 止盈止损）。
+  // 原生快捷键优先级：Tradovate 默认 1/2/3 -> 用户记录的原快捷键 -> 点按钮兜底。
+
+  const NATIVE_CHORDS = {
+    buy: 'Ctrl+Command+Alt+1',
+    sell: 'Ctrl+Command+Alt+2',
+    close: 'Ctrl+Command+Alt+3'
+  };
+
+  function dispatchNativeChord(chordStr) {
+    try {
+      const parsed = parseChord(chordStr);
+      if (!parsed || String(parsed.key).length !== 1) return false;
+      const event = buildSyntheticEvent(parsed, 'keydown');
+      event.__tdvHotkeySynthetic = true;
+      const target = document.body || document.documentElement || document;
+      target.dispatchEvent(event);
+      return event.defaultPrevented;
+    } catch (err) {
+      console.log('[TradingAutoLock hotkey] native dispatch error', err && err.message);
+      hotkeyLog('native_dispatch_error', { chord: chordStr, error: truncateText(err && err.message ? err.message : err, 1000) });
+      return false;
+    }
+  }
+
+  function dispatchNativeAction(action) {
+    const cfg = hotkeyMap[action];
+    const candidates = [];
+    if (NATIVE_CHORDS[action]) candidates.push(NATIVE_CHORDS[action]);
+    if (cfg && cfg.from && candidates.indexOf(cfg.from) === -1) candidates.push(cfg.from);
+    for (let i = 0; i < candidates.length; i++) {
+      if (dispatchNativeChord(candidates[i])) {
+        console.log('[TradingAutoLock hotkey] native ' + action + ' chord=' + candidates[i] + ' handled=true');
+        hotkeyLog('native_result', { action, chord: candidates[i], handled: true });
+        return { handled: true, chord: candidates[i] };
+      }
+      hotkeyLog('native_attempt', { action, chord: candidates[i], handled: false });
+    }
+    console.log('[TradingAutoLock hotkey] native ' + action + ' not handled, fallback to button click');
+    return { handled: false, chord: candidates[candidates.length - 1] || '' };
+  }
+
+  // ---- 下单按钮查找与点击（原生快捷键未处理时兜底） ----
+
+  function normalizeActionText(txt) {
+    return String(txt || '').replace(/[（(][^)）]*[)）]/g, '').replace(/[\s\u00a0]+/g, '').toLowerCase();
+  }
+
+  const ACTION_LABELS = {
+    buy: ['buy', 'buymarket', 'marketbuy', '买入', '买', '买进', '市价买入', '市价买', '市价买进'],
+    sell: ['sell', 'sellmarket', 'marketsell', '卖出', '卖', '卖空', '市价卖出', '市价卖', '市价卖空'],
+    close: ['close', 'flat', 'flatten', 'closeposition', 'flatposition', '平仓', '全部平仓', '市价平仓', '一键平仓', '全平', '退仓', '全部退仓', '市价退仓', '退仓并撤销', '全部退仓并撤销', '市价退仓并撤销', '平仓并撤销', '全部平仓并撤销', '市价平仓并撤销', '清仓', '一键清仓', '全部清仓']
+  };
 
   function findActionButton(action) {
+    const labels = ACTION_LABELS[action];
+    if (!labels) return null;
     const selectors = ['button', '[role="button"]', '[class*="btn"]', '[class*="Btn"]', 'a'];
     let best = null;
     let bestScore = -1;
@@ -189,22 +308,14 @@
       const els = document.querySelectorAll(sel);
       for (let i = 0; i < els.length; i++) {
         const el = els[i];
-        if (el.offsetParent === null && el.getClientRects().length === 0) continue; // 不可见
+        if (el.offsetParent === null && el.getClientRects().length === 0) continue;
         const txt = (el.innerText || el.textContent || '').trim();
         if (!txt || txt.length > 24) continue;
-        const lower = txt.toLowerCase();
-        let hit = false;
-        if (action === 'buy') {
-          hit = lower === 'buy' || lower === 'buy market' || /^buy\s*$/.test(lower);
-        } else if (action === 'sell') {
-          hit = lower === 'sell' || lower === 'sell market' || /^sell\s*$/.test(lower);
-        } else {
-          hit = /^(close|flat|flatten|close position|平仓)$/.test(lower);
-        }
-        if (hit) {
-          const score = el.offsetWidth * el.offsetHeight;
-          if (score > bestScore) { bestScore = score; best = el; }
-        }
+        const normalized = normalizeActionText(txt);
+        if (labels.indexOf(normalized) === -1) continue;
+        const specific = /market|市价/.test(normalized) ? 1 : 0;
+        const score = specific * 1e9 + el.offsetWidth * el.offsetHeight;
+        if (score > bestScore) { bestScore = score; best = el; }
       }
     }
     return best;
@@ -219,6 +330,7 @@
     const btn = findActionButton(action);
     if (!btn) {
       console.log('[TradingAutoLock hotkey] no trade button found for ' + action);
+      hotkeyLog('button_not_found', { action });
       return false;
     }
     guard.t = now;
@@ -226,7 +338,156 @@
     btn.click();
     console.log('[TradingAutoLock hotkey] clicked ' + action + ' button:',
       (btn.innerText || btn.textContent || '').trim().slice(0, 20));
+    hotkeyLog('button_clicked', {
+      action,
+      text: truncateText((btn.innerText || btn.textContent || '').trim(), 80)
+    });
     return true;
+  }
+
+  // ---- 诊断快照（给 content.js / 诊断包用）----
+
+  function elementVisible(el) {
+    if (el.offsetParent !== null) return true;
+    const rects = el.getClientRects ? el.getClientRects() : null;
+    return Boolean(rects && rects.length);
+  }
+
+  function elementRect(el) {
+    try {
+      const r = el.getBoundingClientRect();
+      return {
+        left: Math.round(r.left),
+        top: Math.round(r.top),
+        width: Math.round(r.width),
+        height: Math.round(r.height)
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function describeElement(el) {
+    const text = (el.innerText || el.textContent || '').trim();
+    return {
+      tag: el.tagName || '',
+      id: el.id || '',
+      className: truncateText(typeof el.className === 'string' ? el.className : (el.className && el.className.baseVal) || '', 180),
+      role: el.getAttribute ? el.getAttribute('role') || '' : '',
+      ariaLabel: el.getAttribute ? el.getAttribute('aria-label') || '' : '',
+      title: el.getAttribute ? el.getAttribute('title') || '' : '',
+      text: truncateText(text, 120),
+      normalized: normalizeActionText(text),
+      disabled: Boolean(el.disabled),
+      visible: elementVisible(el),
+      rect: elementRect(el)
+    };
+  }
+
+  function collectButtonSnapshot() {
+    const selectors = ['button', '[role="button"]', '[class*="btn"]', '[class*="Btn"]', 'a'];
+    const seen = new Set();
+    const rows = [];
+    for (const sel of selectors) {
+      const els = document.querySelectorAll(sel);
+      for (let i = 0; i < els.length; i++) {
+        const el = els[i];
+        if (seen.has(el)) continue;
+        seen.add(el);
+        if (!elementVisible(el)) continue;
+        const text = (el.innerText || el.textContent || '').trim();
+        const aria = el.getAttribute ? (el.getAttribute('aria-label') || el.getAttribute('title') || '') : '';
+        if (!text && !aria) continue;
+        const normalized = normalizeActionText(text || aria);
+        let matchedAction = '';
+        for (const action of Object.keys(ACTION_LABELS)) {
+          if (ACTION_LABELS[action].indexOf(normalized) !== -1) {
+            matchedAction = action;
+            break;
+          }
+        }
+        const rect = elementRect(el);
+        rows.push({
+          ...describeElement(el),
+          matchedAction,
+          area: rect ? rect.width * rect.height : 0
+        });
+      }
+    }
+    rows.sort((a, b) => {
+      if (Boolean(b.matchedAction) !== Boolean(a.matchedAction)) return b.matchedAction ? 1 : -1;
+      return b.area - a.area;
+    });
+    return rows.slice(0, 250);
+  }
+
+  function collectActionButtonSnapshot() {
+    const out = {};
+    for (const action of ['buy', 'sell', 'close']) {
+      const btn = findActionButton(action);
+      out[action] = btn ? describeElement(btn) : null;
+    }
+    return out;
+  }
+
+  function storageHotkeySnapshot(store) {
+    if (!store || typeof store.length !== 'number') return { keys: [], hotkeyEntries: [] };
+    const keys = [];
+    const hotkeyEntries = [];
+    try {
+      const count = Math.min(store.length, 300);
+      for (let i = 0; i < count; i++) {
+        const key = store.key(i);
+        if (!key) continue;
+        keys.push(truncateText(key, 160));
+        if (!/hotkey|keybind|shortcut|command|键盘|快捷/i.test(key)) continue;
+        let value = '';
+        try { value = store.getItem(key) || ''; } catch (_) {}
+        hotkeyEntries.push({
+          key: truncateText(key, 160),
+          length: value.length,
+          valuePreview: truncateText(value, 2000)
+        });
+      }
+    } catch (err) {
+      return { keys, hotkeyEntries, error: truncateText(err && err.message ? err.message : err, 500) };
+    }
+    return { keys, hotkeyEntries };
+  }
+
+  function accessStorage(kind) {
+    try {
+      return window[kind] || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function collectHotkeyDebugState(requestId) {
+    return {
+      source: DEBUG_RESPONSE_TYPE,
+      requestId: requestId || '',
+      ok: true,
+      hookBuild: HOOK_BUILD,
+      installed: true,
+      url: location.href,
+      frame: window.top === window.self ? 'top' : 'iframe',
+      isTopFrame: window.top === window.self,
+      map: hotkeyMap,
+      last: window.__tdvHotkeyLast || null,
+      logs: hotkeyLogs.slice(-150),
+      errors: mainWorldErrors.slice(-60),
+      buttons: collectButtonSnapshot(),
+      actionButtons: collectActionButtonSnapshot(),
+      clickGuard: window.__tdvClickGuard || null,
+      configReceivedAt,
+      storage: {
+        local: storageHotkeySnapshot(accessStorage('localStorage')),
+        session: storageHotkeySnapshot(accessStorage('sessionStorage'))
+      },
+      now: Date.now(),
+      nowIso: new Date().toISOString()
+    };
   }
 
   function handleKeydown(e) {
@@ -235,8 +496,18 @@
       // 自检探针：证明 keydown 监听器确实注册成功且能收到事件
       console.log('[TradingAutoLock hotkey] self-test OK (keydown listener alive) frame='
         + (window.top === window.self ? 'top' : 'iframe'));
+      hotkeyLog('self_test_ok', { frame: window.top === window.self ? 'top' : 'iframe' });
       return;
     }
+    try {
+      window.__tdvHotkeyLast = {
+        key: e.key,
+        code: e.code,
+        chord: formatChord(e),
+        matched: false,
+        at: Date.now()
+      };
+    } catch (err) { /* ignore debug snapshot errors */ }
     for (const action of ['buy', 'sell', 'close']) {
       const cfg = hotkeyMap[action];
       if (!cfg || !cfg.to) continue;
@@ -244,7 +515,31 @@
         e.preventDefault();
         e.stopImmediatePropagation();
         e.stopPropagation();
-        clickTradeButton(action);
+        const native = dispatchNativeAction(action);
+        const clicked = native.handled ? false : clickTradeButton(action);
+        try {
+          window.__tdvHotkeyLast = {
+            key: e.key,
+            code: e.code,
+            chord: formatChord(e),
+            matched: true,
+            action: action,
+            target: cfg.to,
+            nativeChord: native.chord,
+            nativeHandled: native.handled,
+            clicked: clicked,
+            at: Date.now()
+          };
+        } catch (err) { /* ignore debug snapshot errors */ }
+        hotkeyLog('hotkey_match', {
+          action,
+          target: cfg.to,
+          key: e.key,
+          code: e.code,
+          nativeChord: native.chord,
+          nativeHandled: native.handled,
+          clicked
+        });
         break;
       }
     }
@@ -256,9 +551,11 @@
   // 注入 1.5s 后派发自检探针，直接验证监听器是否注册成功
   setTimeout(function () {
     try {
-      window.dispatchEvent(new KeyboardEvent('keydown', {
+      const probe = new KeyboardEvent('keydown', {
         key: 'TradingAutoLockSelfTest', code: 'KeyT', bubbles: true, cancelable: true, view: window
-      }));
+      });
+      probe.__tdvSelfTest = true;
+      window.dispatchEvent(probe);
     } catch (err) {
       console.log('[TradingAutoLock hotkey] self-test dispatch error', err && err.message);
     }
@@ -275,8 +572,31 @@
         sell: map.sell || DEFAULT_MAP.sell,
         close: map.close || DEFAULT_MAP.close
       };
+      window.__tdvHotkeyMap = hotkeyMap;
+      configReceivedAt = Date.now();
       console.log('[TradingAutoLock hotkey] config updated platform=tdv',
         'map=' + JSON.stringify(hotkeyMap));
+      hotkeyLog('config_updated', { map: hotkeyMap });
+    }
+  });
+
+  // ---- 诊断请求（来自 content.js 的 postMessage）----
+  // content.js 在 ISOLATED world，读不到 MAIN world 的全局变量；
+  // 这里把 hook 状态、最近按键、按钮候选、页面错误和 storage 线索一次性回传。
+
+  window.addEventListener('message', function (event) {
+    if (!event.data || event.data.source !== DEBUG_REQUEST_TYPE) return;
+    const requestId = event.data.requestId || '';
+    try {
+      window.postMessage(collectHotkeyDebugState(requestId), '*');
+    } catch (err) {
+      window.postMessage({
+        source: DEBUG_RESPONSE_TYPE,
+        requestId,
+        ok: false,
+        error: truncateText(err && err.message ? err.message : err, 1000),
+        now: Date.now()
+      }, '*');
     }
   });
 })();

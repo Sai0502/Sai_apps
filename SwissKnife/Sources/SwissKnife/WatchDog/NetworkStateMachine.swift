@@ -4,22 +4,12 @@ enum NetworkState: String, CaseIterable {
     case online = "Online"
     case verifying = "Verifying"
     case offline = "Offline"
-    case recoveringUSB = "USB Recovery"
-    case recoveringWiFi = "WiFi Recovery"
-    case waitingManual = "Manual Recovery"
 }
 
 enum NetworkEvent: String {
     case internetAvailable
     case internetLost
     case offlineConfirmed
-    case usbRecoveryStarted
-    case usbRecoverySucceeded
-    case usbRecoveryFailed
-    case wifiRecoveryStarted
-    case wifiRecoverySucceeded
-    case wifiRecoveryFailed
-    case manualRequired
 }
 
 @MainActor
@@ -28,14 +18,11 @@ protocol NetworkStateObserver: AnyObject {
 }
 
 final class NetworkStateMachine: @unchecked Sendable {
-    private let logger: EventLogger
     private let queue = DispatchQueue(label: "network-watchdog.state-machine")
     private var observers: [WeakStateObserver] = []
     private(set) var state: NetworkState = .online
 
-    init(logger: EventLogger) {
-        self.logger = logger
-    }
+    init() {}
 
     @MainActor
     func addObserver(_ observer: NetworkStateObserver) {
@@ -44,11 +31,9 @@ final class NetworkStateMachine: @unchecked Sendable {
 
     func send(_ event: NetworkEvent) {
         queue.async {
-            let oldState = self.state
-            let newState = self.nextState(from: oldState, event: event)
-            guard newState != oldState else { return }
+            let newState = self.nextState(from: self.state, event: event)
+            guard newState != self.state else { return }
             self.state = newState
-            self.logger.log("STATE from=\(oldState.rawValue.replacingOccurrences(of: " ", with: "_")) event=\(event.rawValue) to=\(newState.rawValue.replacingOccurrences(of: " ", with: "_"))")
             Task { @MainActor in
                 self.notify(newState)
             }
@@ -61,22 +46,12 @@ final class NetworkStateMachine: @unchecked Sendable {
 
     private func nextState(from state: NetworkState, event: NetworkEvent) -> NetworkState {
         switch (state, event) {
-        case (_, .internetAvailable), (_, .usbRecoverySucceeded), (_, .wifiRecoverySucceeded):
+        case (_, .internetAvailable):
             return .online
         case (.online, .internetLost):
             return .verifying
-        case (.verifying, .offlineConfirmed):
+        case (.verifying, .offlineConfirmed), (.offline, .offlineConfirmed):
             return .offline
-        case (.offline, .usbRecoveryStarted):
-            return .recoveringUSB
-        case (.offline, .wifiRecoveryStarted), (.recoveringUSB, .wifiRecoveryStarted):
-            return .recoveringWiFi
-        case (.recoveringUSB, .usbRecoveryFailed):
-            return .offline
-        case (.recoveringWiFi, .wifiRecoveryFailed), (_, .manualRequired):
-            return .waitingManual
-        case (.waitingManual, .internetLost):
-            return .waitingManual
         default:
             return state
         }

@@ -8,7 +8,6 @@ final class WheelTamerModule: NSObject, @preconcurrency WheelTamerDelegate {
 
     private let wheelTamer = WheelTamer()
     private let settingsStore = WheelStore.shared
-    private let logger = WheelLogger.shared
 
     private let scalePresets: [Double] = [0.5, 0.7, 0.8, 1.0, 2.0, 5.0, 100.0]
 
@@ -34,11 +33,6 @@ final class WheelTamerModule: NSObject, @preconcurrency WheelTamerDelegate {
 
     func wheelTamerDidUpdate(_ tamer: WheelTamer) {
         // 菜单每次展开时重建，无需主动刷新
-    }
-
-    /// 工具设置页修改滚轮配置后，通知拦截器重载
-    func refreshWheelSettings() {
-        wheelTamer.refreshSettings()
     }
 
     // MARK: - 菜单

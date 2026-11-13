@@ -1,0 +1,245 @@
+//@version=6
+indicator("结构突破回调提醒 v2", "结构回调 v2", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// ══════════════════════════ 输入 ══════════════════════════
+gSig = "信号"
+fibRatio   = input.float(0.5, "回踩比例", minval=0.05, maxval=0.95, step=0.05, group=gSig,
+     tooltip="从段起点量到段终点。0.5 = 回撤一半。")
+useFvg     = input.bool(true, "突破段必须有 FVG", group=gSig,
+     tooltip="起点到第一根突破K之间，如果K线数≥3根，这段里至少要有一次 FVG（三根K，第1根的高 < 第3根的低）。不足3根不要求。")
+
+gDraw = "显示"
+showSeg    = input.bool(true, "显示段与回踩位", group=gDraw)
+showLbl    = input.bool(true, "显示价格标签", group=gDraw)
+colLevel   = input.color(#f97316, "回踩位颜色", group=gDraw)
+colSeg     = input.color(color.new(color.gray, 35), "段线颜色", group=gDraw)
+
+gAlert = "提醒"
+alertTitle = input.string("结构突破回调提醒", "提醒标题", group=gAlert)
+
+// ══════════════════════════ 结构点引擎 ══════════════════════════
+// 母K过滤：被前一根完全包住的K不参与分型；3点分型只留一种结构点。
+MAX_SIZE = 1000
+
+var array<float> eHigh = array.new<float>()
+var array<float> eLow  = array.new<float>()
+var array<int>   eBar  = array.new<int>()
+
+var float motherHigh = na
+var float motherLow  = na
+
+var float pHigh    = na          // 最近一个结构高点
+var int   pHighBar = na
+var float pLow     = na          // 最近一个结构低点
+var int   pLowBar  = na
+
+var float lvlHigh    = na        // 还没被收盘破过的结构高点
+var int   lvlHighBar = na
+var float lvlLow     = na
+var int   lvlLowBar  = na
+
+// 从最近结构低点起算的最高点（多头段的终点候选）
+var float runHigh    = na
+var int   runHighBar = na
+// 从最近结构高点起算的最低点（空头段的终点候选）
+var float runLow    = na
+var int   runLowBar  = na
+
+bool pushed = false
+if na(motherHigh) or not (high <= motherHigh and low >= motherLow)
+    motherHigh := high
+    motherLow  := low
+    array.push(eHigh, high)
+    array.push(eLow, low)
+    array.push(eBar, bar_index)
+    if array.size(eHigh) > MAX_SIZE
+        array.shift(eHigh)
+        array.shift(eLow)
+        array.shift(eBar)
+    pushed := true
+
+if pushed and array.size(eHigh) >= 3
+    int n = array.size(eHigh) - 1
+    if array.get(eHigh, n - 1) > array.get(eHigh, n - 2) and array.get(eHigh, n - 1) > array.get(eHigh, n)
+        pHigh    := array.get(eHigh, n - 1)
+        pHighBar := array.get(eBar, n - 1)
+        if close <= pHigh
+            lvlHigh    := pHigh
+            lvlHighBar := bar_index
+        else
+            lvlHigh := na
+        runLow    := low[bar_index - pHighBar]
+        runLowBar := pHighBar
+    if array.get(eLow, n - 1) < array.get(eLow, n - 2) and array.get(eLow, n - 1) < array.get(eLow, n)
+        pLow    := array.get(eLow, n - 1)
+        pLowBar := array.get(eBar, n - 1)
+        if close >= pLow
+            lvlLow    := pLow
+            lvlLowBar := bar_index
+        else
+            lvlLow := na
+        runHigh    := high[bar_index - pLowBar]
+        runHighBar := pLowBar
+
+if not na(runHigh) and high > runHigh
+    runHigh    := high
+    runHighBar := bar_index
+if not na(runLow) and low < runLow
+    runLow    := low
+    runLowBar := bar_index
+
+// ══════════════════════════ 突破：两根连续收盘 ══════════════════════════
+var float tstHighClose = na
+var float tstHighLvl   = na
+var int   tstHighBar   = na
+var float tstLowClose  = na
+var float tstLowLvl    = na
+var int   tstLowBar    = na
+
+bool bullBrk = false
+bool bearBrk = false
+
+// 第二根：收盘继续越过第一根
+if not na(tstHighClose)
+    if close > tstHighClose
+        bullBrk := true
+    tstHighClose := na
+if not na(tstLowClose)
+    if close < tstLowClose
+        bearBrk := true
+    tstLowClose := na
+
+// 第一根：收盘越过结构点
+if not bullBrk and not na(lvlHigh) and lvlHighBar < bar_index and close > lvlHigh and na(tstHighClose)
+    tstHighLvl   := lvlHigh
+    tstHighClose := close
+    tstHighBar   := bar_index
+if not bearBrk and not na(lvlLow) and lvlLowBar < bar_index and close < lvlLow and na(tstLowClose)
+    tstLowLvl   := lvlLow
+    tstLowClose := close
+    tstLowBar   := bar_index
+
+if bullBrk
+    lvlHigh := na
+if bearBrk
+    lvlLow := na
+
+// ══════════════════════════ 段的建立 ══════════════════════════
+// 同一时间只有一个 setup，新突破直接替换旧的。
+var int   suDir      = 0        // 1 多，-1 空
+var float suStart    = na
+var int   suStartBar = na
+var float suEnd      = na
+var int   suEndBar   = na
+var int   suBreakBar = na
+var float suLevel    = na
+var bool  suFrozen   = false
+var bool  suFired    = false
+
+if bullBrk or bearBrk
+    int   dir = bullBrk ? 1 : -1
+    float sP  = bullBrk ? pLow : pHigh
+    int   sB  = bullBrk ? pLowBar : pHighBar
+    bool  ok  = not na(sP) and not na(sB)
+
+    if ok and useFvg
+        int span = (bar_index - 1) - sB + 1
+        if span >= 3
+            bool hasFvg = false
+            if bullBrk
+                for i = sB + 2 to bar_index - 1
+                    if not hasFvg and low[i] > high[i - 2]
+                        hasFvg := true
+            else
+                for i = sB + 2 to bar_index - 1
+                    if not hasFvg and high[i] < low[i - 2]
+                        hasFvg := true
+            ok := hasFvg
+
+    if ok
+        suDir      := dir
+        suStart    := sP
+        suStartBar := sB
+        suEnd      := bullBrk ? runHigh : runLow
+        suEndBar   := bullBrk ? runHighBar : runLowBar
+        suBreakBar := bar_index - 1
+        suFrozen   := false
+        suFired    := false
+        suLevel    := na
+
+// ══════════════════════════ 段的推进与提醒 ══════════════════════════
+if suDir != 0
+    // 终点：突破后继续创极值就跟着上移，直到回踩的第一个结构点确认
+    if not suFrozen
+        if suDir == 1 and high > suEnd
+            suEnd    := high
+            suEndBar := bar_index
+        if suDir == -1 and low < suEnd
+            suEnd    := low
+            suEndBar := bar_index
+        if suDir == 1 and not na(pLowBar) and pLowBar > suBreakBar
+            suFrozen := true
+        if suDir == -1 and not na(pHighBar) and pHighBar > suBreakBar
+            suFrozen := true
+
+    float lvl = na
+    if suDir == 1
+        lvl := suEnd - (suEnd - suStart) * fibRatio
+    else
+        lvl := suEnd + (suStart - suEnd) * fibRatio
+    suLevel := lvl
+
+    bool dead = suDir == 1 ? close < suStart : close > suStart
+    bool hit  = suDir == 1 ? low <= lvl : high >= lvl
+
+    if dead
+        suDir := 0
+    else if not suFired and hit
+        suFired := true
+        string dirTxt = suDir == 1 ? "多头" : "空头"
+        alert(alertTitle + "｜" + syminfo.ticker + " " + timeframe.period + "｜" + dirTxt
+             + "回踩 " + str.tostring(fibRatio, "#.##")
+             + "｜段 " + str.tostring(suStart, format.mintick) + " → " + str.tostring(suEnd, format.mintick)
+             + "｜回踩位 " + str.tostring(lvl, format.mintick), alert.freq_once_per_bar)
+
+// ══════════════════════════ 画图 ══════════════════════════
+var line  lnS = na
+var line  lnE = na
+var line  lnL = na
+var label lbS = na
+var label lbE = na
+var label lbL = na
+
+if showSeg and suDir != 0
+    int x2 = bar_index + 2
+    if na(lnS)
+        lnS := line.new(suStartBar, suStart, x2, suStart, color=colSeg, style=line.style_dashed, width=1)
+        lnE := line.new(suStartBar, suEnd,   x2, suEnd,   color=colSeg, style=line.style_dashed, width=1)
+        lnL := line.new(suStartBar, suLevel, x2, suLevel, color=colLevel, width=2)
+    else
+        line.set_xy1(lnS, suStartBar, suStart)
+        line.set_xy2(lnS, x2, suStart)
+        line.set_xy1(lnE, suStartBar, suEnd)
+        line.set_xy2(lnE, x2, suEnd)
+        line.set_xy1(lnL, suStartBar, suLevel)
+        line.set_xy2(lnL, x2, suLevel)
+
+    if showLbl
+        string tS = "起 " + str.tostring(suStart, format.mintick)
+        string tE = (suDir == 1 ? "顶 " : "底 ") + str.tostring(suEnd, format.mintick)
+        string tL = str.tostring(fibRatio, "#.##") + "  " + str.tostring(suLevel, format.mintick)
+        if na(lbS)
+            lbS := label.new(suStartBar, suStart, tS, style=label.style_label_center, color=color.new(colSeg, 85),   textcolor=colSeg,   size=size.small)
+            lbE := label.new(suStartBar, suEnd,   tE, style=label.style_label_center, color=color.new(colSeg, 85),   textcolor=colSeg,   size=size.small)
+            lbL := label.new(x2,         suLevel, tL, style=label.style_label_left,   color=color.new(colLevel, 80), textcolor=colLevel, size=size.small)
+        else
+            label.set_xy(lbS, suStartBar, suStart)
+            label.set_text(lbS, tS)
+            label.set_xy(lbE, suStartBar, suEnd)
+            label.set_text(lbE, tE)
+            label.set_xy(lbL, x2, suLevel)
+            label.set_text(lbL, tL)
+
+// 突破当根的小标记
+plotshape(bullBrk, title="多头突破", style=shape.triangleup,   location=location.belowbar, color=color.new(#22c55e, 0), size=size.tiny)
+plotshape(bearBrk, title="空头突破", style=shape.triangledown, location=location.abovebar, color=color.new(#ef4444, 0), size=size.tiny)

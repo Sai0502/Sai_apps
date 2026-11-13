@@ -1,0 +1,717 @@
+//@version=6
+indicator("结构突破回调提醒1113", overlay=true, max_lines_count=500, max_labels_count=500)
+
+groupL1 = "LEVEL 1"
+groupL2 = "LEVEL 2"
+groupVolume = "放量模式"
+groupFib = "突破段标记"
+
+alertLevel = input.string("Level 2 ITH/ITL", "App提醒使用层级", options=["Level 1 STH/STL", "Level 2 ITH/ITL", "Level 1 + Level 2"])
+
+showLevel1Points = input.bool(true, "Level 1 STH/STL", group=groupL1, inline="l1_points")
+level1Color = input.color(color.new(color.gray, 15), "", group=groupL1, inline="l1_points")
+showLevel1BOS = input.bool(true, "Level 1 结构突破线", group=groupL1, inline="l1_line")
+level1BreakColor = input.color(color.new(color.gray, 20), "", group=groupL1, inline="l1_line")
+level1LineWidth = input.int(1, "线宽", minval=1, maxval=5, group=groupL1, inline="l1_line")
+
+showLevel2Points = input.bool(true, "Level 2 ITH/ITL", group=groupL2, inline="l2_points")
+level2Color = input.color(color.new(color.yellow, 0), "", group=groupL2, inline="l2_points")
+showLevel2BOS = input.bool(true, "Level 2 结构突破线", group=groupL2, inline="l2_line")
+level2BreakColor = input.color(color.lime, "", group=groupL2, inline="l2_line")
+level2LineWidth = input.int(2, "线宽", minval=1, maxval=5, group=groupL2, inline="l2_line")
+
+volumeMode = input.bool(false, "放量模式", group=groupVolume, inline="volume_line")
+volumeLength = 20
+volumeMultiplier = 1.25
+volumeBreakColor = input.color(color.black, "", group=groupVolume, active=volumeMode, inline="volume_line")
+volumeLineWidth = input.int(3, "线宽", minval=1, maxval=5, group=groupVolume, active=volumeMode, inline="volume_line")
+volumeConfirmMode = input.string("允许下一根K补放量确认", "放量确认方式", options=["突破K必须放量", "允许下一根K补放量确认", "允许N根内补放量确认"], group=groupVolume, active=volumeMode)
+volumeConfirmBars = input.int(3, "N根内补放量确认K数", minval=1, group=groupVolume, active=volumeMode and volumeConfirmMode == "允许N根内补放量确认")
+showVolumeBarColors = input.bool(true, "放量K颜色", group=groupVolume, inline="volume_colors")
+volumeBarBullHeavyColor = input.color(color.lime, "", group=groupVolume, inline="volume_colors", active=showVolumeBarColors)
+volumeBarBearHeavyColor = input.color(color.red, "", group=groupVolume, inline="volume_colors", active=showVolumeBarColors)
+volumeBarBullNormalColor = input.color(color.silver, "", group=groupVolume, inline="volume_colors", active=showVolumeBarColors)
+volumeBarBearNormalColor = input.color(color.gray, "", group=groupVolume, inline="volume_colors", active=showVolumeBarColors)
+
+// 突破段标记
+showBreakSegment = input.bool(true, "突破段起点/终点箭头", group=groupFib, inline="fib_main")
+segmentArrowColor = input.color(color.red, "箭头颜色", group=groupFib, inline="fib_main")
+showFib618 = input.bool(true, "61.8% 回撤位", group=groupFib, inline="fib_line")
+fib618Color = input.color(color.orange, "", group=groupFib, inline="fib_line")
+fib618LineWidth = input.int(1, "线宽", minval=1, maxval=3, group=groupFib, inline="fib_line")
+
+var array<float> effectiveHighs = array.new<float>()
+var array<float> effectiveLows = array.new<float>()
+var array<int> effectiveBars = array.new<int>()
+var array<int> effectiveTimes = array.new<int>()
+
+var array<float> sthValues = array.new<float>()
+var array<int> sthBars = array.new<int>()
+var array<int> sthTimes = array.new<int>()
+var array<float> stlValues = array.new<float>()
+var array<int> stlBars = array.new<int>()
+var array<int> stlTimes = array.new<int>()
+
+var float motherHigh = na
+var float motherLow = na
+
+var float activeSTH = na
+var int activeSTHBar = na
+var int activeSTHTime = na
+var float activeSTHLine = na
+var int activeSTHLineTime = na
+var bool activeSTHBroken = true
+var bool activeSTHIsL2 = false
+var float activeSTL = na
+var int activeSTLBar = na
+var int activeSTLTime = na
+var float activeSTLLine = na
+var int activeSTLLineTime = na
+var bool activeSTLBroken = true
+var bool activeSTLIsL2 = false
+
+var float activeITH = na
+var int activeITHBar = na
+var int activeITHTime = na
+var bool activeITHBroken = true
+var float activeITL = na
+var int activeITLBar = na
+var int activeITLTime = na
+var bool activeITLBroken = true
+
+var float highestValidHigh = na
+var int highestValidHighBar = na
+var int highestValidHighTime = na
+var float highestValidHighLine = na
+var int highestValidHighLineTime = na
+var bool highestValidHighBroken = true
+var float lowestValidLow = na
+var int lowestValidLowBar = na
+var int lowestValidLowTime = na
+var float lowestValidLowLine = na
+var int lowestValidLowLineTime = na
+var bool lowestValidLowBroken = true
+
+var int biasL1 = 0
+var int biasL2 = 0
+
+var bool pendingL1Active = false
+var int pendingL1Direction = 0
+var bool pendingL1WasMSS = false
+var float pendingL1BreakClose = na
+var float pendingL1BreakLevel = na
+var int pendingL1BreakBar = na
+var float pendingL1SegmentStart = na
+var int pendingL1SegmentStartTime = na
+
+var bool pendingL2Active = false
+var int pendingL2Direction = 0
+var bool pendingL2WasMSS = false
+var float pendingL2BreakClose = na
+var float pendingL2BreakLevel = na
+var int pendingL2BreakBar = na
+var float pendingL2SegmentStart = na
+var int pendingL2SegmentStartTime = na
+
+var bool volumeWaitActive = false
+var int volumeWaitDirection = 0
+var int volumeWaitLevel = 0
+var bool volumeWaitWasMSS = false
+var float volumeWaitBreakClose = na
+var float volumeWaitBreakLevel = na
+var int volumeWaitBreakBar = na
+var int volumeWaitExpiresBar = na
+var float volumeWaitSegmentStart = na
+var int volumeWaitSegmentStartTime = na
+var line volumeWaitLine = na
+var line breakLine = na
+var int lastAlertL1Direction = 0
+var float lastAlertL1BreakLevel = na
+var float lastAlertL1BreakClose = na
+var int lastAlertL2Direction = 0
+var float lastAlertL2BreakLevel = na
+var float lastAlertL2BreakClose = na
+
+// 突破段标记状态：永远只保留最新一组
+var label segmentStartLabel = na
+var label segmentEndLabel = na
+var line segmentFib618Line = na
+
+// 数组最大容量
+MAX_ARRAY_SIZE = 1000
+
+f_confirm_low(array<float> values, array<int> bars, array<int> times) =>
+    bool ok = false
+    float price = na
+    int pointBar = na
+    int pointTime = na
+    int n = array.size(values)
+    if n >= 3
+        float left = array.get(values, n - 3)
+        float mid = array.get(values, n - 2)
+        float right = array.get(values, n - 1)
+        if left > mid and right > mid
+            ok := true
+            price := mid
+            pointBar := array.get(bars, n - 2)
+            pointTime := array.get(times, n - 2)
+    [ok, price, pointBar, pointTime]
+
+f_confirm_high(array<float> values, array<int> bars, array<int> times) =>
+    bool ok = false
+    float price = na
+    int pointBar = na
+    int pointTime = na
+    int n = array.size(values)
+    if n >= 3
+        float left = array.get(values, n - 3)
+        float mid = array.get(values, n - 2)
+        float right = array.get(values, n - 1)
+        if left < mid and right < mid
+            ok := true
+            price := mid
+            pointBar := array.get(bars, n - 2)
+            pointTime := array.get(times, n - 2)
+    [ok, price, pointBar, pointTime]
+
+f_mark(pointTime, price, labelText, bgColor, markerStyle, showMarker) =>
+    if showMarker
+        label.new(pointTime, price, labelText, xloc=xloc.bar_time, style=markerStyle, color=bgColor, textcolor=color.black, size=size.tiny)
+
+f_alert_message(directionText, breakTypeText, levelText, breakLevel, breakClose) =>
+    directionText + " " + breakTypeText + " [" + levelText + "] pullback started on " + syminfo.ticker + ". Break level: " + str.tostring(breakLevel) + ". Break close: " + str.tostring(breakClose) + ". Current close: " + str.tostring(close) + ". Timeframe: " + timeframe.period + "."
+
+f_base_line_width(level) =>
+    level == 1 ? level1LineWidth : level2LineWidth
+
+f_break_line_width(level, volumeConfirmed) =>
+    volumeConfirmed ? volumeLineWidth : f_base_line_width(level)
+
+f_can_wait_for_volume() =>
+    volumeMode and volumeConfirmMode != "突破K必须放量"
+
+f_volume_wait_expires_bar(breakBar) =>
+    volumeConfirmMode == "允许下一根K补放量确认" ? breakBar + 1 : breakBar + volumeConfirmBars
+
+f_same_alert(direction, breakLevel, breakClose, lastDirection, lastBreakLevel, lastBreakClose) =>
+    direction == lastDirection and not na(breakLevel) and not na(breakClose) and not na(lastBreakLevel) and not na(lastBreakClose) and math.abs(breakLevel - lastBreakLevel) <= syminfo.mintick * 0.5 and math.abs(breakClose - lastBreakClose) <= syminfo.mintick * 0.5
+
+// 突破段标记函数（只负责计算 fib 值，不修改全局 var）
+f_fib618(startPrice, endPrice) =>
+    float diff = endPrice - startPrice
+    endPrice - diff * 0.618
+
+// 突破段起点：这一段上涨的起点 = 突破前最近一个未破的结构低点
+// 若该点已被跌破，退回最近 50 根的最低点（V 型反转时用）
+f_leg_start_low() =>
+    int off = ta.lowestbars(low, 50)
+    float s = na
+    int t = na
+    if not na(activeSTL) and not activeSTLBroken
+        s := activeSTL
+        t := activeSTLTime
+    else if not na(off)
+        s := low[math.abs(off)]
+        t := time[math.abs(off)]
+    [s, t]
+
+// 突破段起点（空头）：这一段下跌的起点 = 突破前最近一个未破的结构高点
+f_leg_start_high() =>
+    int off = ta.highestbars(high, 50)
+    float s = na
+    int t = na
+    if not na(activeSTH) and not activeSTHBroken
+        s := activeSTH
+        t := activeSTHTime
+    else if not na(off)
+        s := high[math.abs(off)]
+        t := time[math.abs(off)]
+    [s, t]
+
+alertL1Enabled = alertLevel == "Level 1 STH/STL" or alertLevel == "Level 1 + Level 2"
+alertL2Enabled = alertLevel == "Level 2 ITH/ITL" or alertLevel == "Level 1 + Level 2"
+volumeAverage = ta.sma(volume, volumeLength)
+isVolumeBreakout = not na(volumeAverage) and volume > volumeAverage * volumeMultiplier
+isUpCandle = close > open
+isDownCandle = open > close
+volumeBarColor = showVolumeBarColors ? (isVolumeBreakout ? (isUpCandle ? volumeBarBullHeavyColor : isDownCandle ? volumeBarBearHeavyColor : volumeBarBullNormalColor) : (isUpCandle ? volumeBarBullNormalColor : isDownCandle ? volumeBarBearNormalColor : volumeBarBullNormalColor)) : na
+
+barcolor(volumeBarColor, editable=false)
+
+newEffectiveBar = false
+
+if na(motherHigh)
+    motherHigh := high
+    motherLow := low
+    array.push(effectiveHighs, high)
+    array.push(effectiveLows, low)
+    array.push(effectiveBars, bar_index)
+    array.push(effectiveTimes, time)
+    newEffectiveBar := true
+else
+    if not (high <= motherHigh and low >= motherLow)
+        motherHigh := high
+        motherLow := low
+        array.push(effectiveHighs, high)
+        array.push(effectiveLows, low)
+        array.push(effectiveBars, bar_index)
+        array.push(effectiveTimes, time)
+        newEffectiveBar := true
+
+// 数组容量管理：超出 MAX_ARRAY_SIZE 时移除最早元素
+if array.size(effectiveHighs) > MAX_ARRAY_SIZE
+    array.shift(effectiveHighs)
+    array.shift(effectiveLows)
+    array.shift(effectiveBars)
+    array.shift(effectiveTimes)
+
+newSTH = false
+newSTL = false
+
+if newEffectiveBar
+    int n = array.size(effectiveBars)
+    if n >= 3
+        float leftHigh = array.get(effectiveHighs, n - 3)
+        float midHigh = array.get(effectiveHighs, n - 2)
+        float rightHigh = array.get(effectiveHighs, n - 1)
+        float leftLow = array.get(effectiveLows, n - 3)
+        float midLow = array.get(effectiveLows, n - 2)
+        float rightLow = array.get(effectiveLows, n - 1)
+        int midBar = array.get(effectiveBars, n - 2)
+        int midTime = array.get(effectiveTimes, n - 2)
+
+        if midHigh > leftHigh and midHigh > rightHigh
+            newSTH := true
+            array.push(sthValues, midHigh)
+            array.push(sthBars, midBar)
+            array.push(sthTimes, midTime)
+            // STH 数组容量管理
+            if array.size(sthValues) > MAX_ARRAY_SIZE
+                array.shift(sthValues)
+                array.shift(sthBars)
+                array.shift(sthTimes)
+            activeSTH := midHigh
+            activeSTHBar := midBar
+            activeSTHTime := midTime
+            activeSTHLine := midHigh
+            activeSTHLineTime := midTime
+            activeSTHBroken := false
+            activeSTHIsL2 := false
+            f_mark(midTime, midHigh, "STH", level1Color, label.style_label_down, showLevel1Points)
+            if not na(activeITH) and activeSTH >= activeITH
+                highestValidHigh := activeSTH
+                highestValidHighBar := activeSTHBar
+                highestValidHighTime := activeSTHTime
+                highestValidHighLine := activeSTHLine
+                highestValidHighLineTime := activeSTHLineTime
+                highestValidHighBroken := false
+                activeSTHIsL2 := true
+            [confirmedITH, ithPrice, ithBar, ithTime] = f_confirm_high(sthValues, sthBars, sthTimes)
+            if confirmedITH
+                activeITH := ithPrice
+                activeITHBar := ithBar
+                activeITHTime := ithTime
+                activeITHBroken := false
+                f_mark(ithTime, ithPrice, "ITH", level2Color, label.style_label_down, showLevel2Points)
+                if not na(activeSTH) and not activeSTHBroken and activeSTH >= activeITH
+                    highestValidHigh := activeSTH
+                    highestValidHighBar := activeSTHBar
+                    highestValidHighTime := activeSTHTime
+                    highestValidHighLine := activeSTHLine
+                    highestValidHighLineTime := activeSTHLineTime
+                    highestValidHighBroken := false
+                    activeSTHIsL2 := true
+                else
+                    highestValidHigh := activeITH
+                    highestValidHighBar := activeITHBar
+                    highestValidHighTime := activeITHTime
+                    highestValidHighLine := activeITH
+                    highestValidHighLineTime := activeITHTime
+                    highestValidHighBroken := false
+                    activeSTHIsL2 := false
+
+        if midLow < leftLow and midLow < rightLow
+            newSTL := true
+            array.push(stlValues, midLow)
+            array.push(stlBars, midBar)
+            array.push(stlTimes, midTime)
+            // STL 数组容量管理
+            if array.size(stlValues) > MAX_ARRAY_SIZE
+                array.shift(stlValues)
+                array.shift(stlBars)
+                array.shift(stlTimes)
+            activeSTL := midLow
+            activeSTLBar := midBar
+            activeSTLTime := midTime
+            activeSTLLine := midLow
+            activeSTLLineTime := midTime
+            activeSTLBroken := false
+            activeSTLIsL2 := false
+            f_mark(midTime, midLow, "STL", level1Color, label.style_label_up, showLevel1Points)
+            if not na(activeITL) and activeSTL <= activeITL
+                lowestValidLow := activeSTL
+                lowestValidLowBar := activeSTLBar
+                lowestValidLowTime := activeSTLTime
+                lowestValidLowLine := activeSTLLine
+                lowestValidLowLineTime := activeSTLLineTime
+                lowestValidLowBroken := false
+                activeSTLIsL2 := true
+            [confirmedITL, itlPrice, itlBar, itlTime] = f_confirm_low(stlValues, stlBars, stlTimes)
+            if confirmedITL
+                activeITL := itlPrice
+                activeITLBar := itlBar
+                activeITLTime := itlTime
+                activeITLBroken := false
+                f_mark(itlTime, itlPrice, "ITL", level2Color, label.style_label_up, showLevel2Points)
+                if not na(activeSTL) and not activeSTLBroken and activeSTL <= activeITL
+                    lowestValidLow := activeSTL
+                    lowestValidLowBar := activeSTLBar
+                    lowestValidLowTime := activeSTLTime
+                    lowestValidLowLine := activeSTLLine
+                    lowestValidLowLineTime := activeSTLLineTime
+                    lowestValidLowBroken := false
+                    activeSTLIsL2 := true
+                else
+                    lowestValidLow := activeITL
+                    lowestValidLowBar := activeITLBar
+                    lowestValidLowTime := activeITLTime
+                    lowestValidLowLine := activeITL
+                    lowestValidLowLineTime := activeITLTime
+                    lowestValidLowBroken := false
+                    activeSTLIsL2 := false
+
+if not na(activeSTH) and not activeSTHBroken and high > activeSTH and close <= activeSTH
+    activeSTH := high
+    activeSTHBar := bar_index
+    activeSTHTime := time
+    if not na(activeITH) and activeSTH > activeITH
+        highestValidHigh := activeSTH
+        highestValidHighBar := activeSTHBar
+        highestValidHighTime := activeSTHTime
+        highestValidHighLine := activeSTHLine
+        highestValidHighLineTime := activeSTHLineTime
+        highestValidHighBroken := false
+        activeSTHIsL2 := true
+
+if not na(activeSTL) and not activeSTLBroken and low < activeSTL and close >= activeSTL
+    activeSTL := low
+    activeSTLBar := bar_index
+    activeSTLTime := time
+    if not na(activeITL) and activeSTL < activeITL
+        lowestValidLow := activeSTL
+        lowestValidLowBar := activeSTLBar
+        lowestValidLowTime := activeSTLTime
+        lowestValidLowLine := activeSTLLine
+        lowestValidLowLineTime := activeSTLLineTime
+        lowestValidLowBroken := false
+        activeSTLIsL2 := true
+
+if not na(highestValidHigh) and not highestValidHighBroken and high > highestValidHigh and close <= highestValidHigh
+    highestValidHigh := high
+    highestValidHighBar := bar_index
+    highestValidHighTime := time
+
+if not na(lowestValidLow) and not lowestValidLowBroken and low < lowestValidLow and close >= lowestValidLow
+    lowestValidLow := low
+    lowestValidLowBar := bar_index
+    lowestValidLowTime := time
+
+// 突破段起点：在突破处理之前算好，取的是"突破前"的结构点
+[legStartLow, legStartLowTime] = f_leg_start_low()
+[legStartHigh, legStartHighTime] = f_leg_start_high()
+
+if volumeWaitActive
+    if isVolumeBreakout and bar_index > volumeWaitBreakBar and bar_index <= volumeWaitExpiresBar
+        if not na(volumeWaitLine)
+            line.set_color(volumeWaitLine, volumeBreakColor)
+            line.set_width(volumeWaitLine, volumeLineWidth)
+        if volumeWaitLevel == 1
+            pendingL1Active := alertL1Enabled
+            pendingL1Direction := volumeWaitDirection
+            pendingL1WasMSS := volumeWaitWasMSS
+            pendingL1BreakClose := volumeWaitBreakClose
+            pendingL1BreakLevel := volumeWaitBreakLevel
+            pendingL1BreakBar := volumeWaitBreakBar
+            pendingL1SegmentStart := volumeWaitSegmentStart
+            pendingL1SegmentStartTime := volumeWaitSegmentStartTime
+        else
+            pendingL2Active := alertL2Enabled
+            pendingL2Direction := volumeWaitDirection
+            pendingL2WasMSS := volumeWaitWasMSS
+            pendingL2BreakClose := volumeWaitBreakClose
+            pendingL2BreakLevel := volumeWaitBreakLevel
+            pendingL2BreakBar := volumeWaitBreakBar
+            pendingL2SegmentStart := volumeWaitSegmentStart
+            pendingL2SegmentStartTime := volumeWaitSegmentStartTime
+        volumeWaitActive := false
+    else if bar_index > volumeWaitExpiresBar
+        volumeWaitActive := false
+
+// 收盘跌破/涨破突破段起点 → 这一段已走坏，回踩 setup 作废
+if pendingL1Active and not na(pendingL1SegmentStart)
+    if (pendingL1Direction == 1 and close < pendingL1SegmentStart) or (pendingL1Direction == -1 and close > pendingL1SegmentStart)
+        pendingL1Active := false
+if pendingL2Active and not na(pendingL2SegmentStart)
+    if (pendingL2Direction == 1 and close < pendingL2SegmentStart) or (pendingL2Direction == -1 and close > pendingL2SegmentStart)
+        pendingL2Active := false
+
+bullPullbackL1Raw = alertL1Enabled and pendingL1Active and pendingL1Direction == 1 and newSTH and bar_index > pendingL1BreakBar
+bearPullbackL1Raw = alertL1Enabled and pendingL1Active and pendingL1Direction == -1 and newSTL and bar_index > pendingL1BreakBar
+bullPullbackL2Raw = alertL2Enabled and pendingL2Active and pendingL2Direction == 1 and newSTH and bar_index > pendingL2BreakBar
+bearPullbackL2Raw = alertL2Enabled and pendingL2Active and pendingL2Direction == -1 and newSTL and bar_index > pendingL2BreakBar
+
+bullPullbackL1Duplicate = f_same_alert(1, pendingL1BreakLevel, pendingL1BreakClose, lastAlertL1Direction, lastAlertL1BreakLevel, lastAlertL1BreakClose)
+bearPullbackL1Duplicate = f_same_alert(-1, pendingL1BreakLevel, pendingL1BreakClose, lastAlertL1Direction, lastAlertL1BreakLevel, lastAlertL1BreakClose)
+bullPullbackL2Duplicate = f_same_alert(1, pendingL2BreakLevel, pendingL2BreakClose, lastAlertL2Direction, lastAlertL2BreakLevel, lastAlertL2BreakClose)
+bearPullbackL2Duplicate = f_same_alert(-1, pendingL2BreakLevel, pendingL2BreakClose, lastAlertL2Direction, lastAlertL2BreakLevel, lastAlertL2BreakClose)
+
+bullPullbackL1 = bullPullbackL1Raw and not bullPullbackL2Raw and not bullPullbackL1Duplicate
+bearPullbackL1 = bearPullbackL1Raw and not bearPullbackL2Raw and not bearPullbackL1Duplicate
+bullPullbackL2 = bullPullbackL2Raw and not bullPullbackL2Duplicate
+bearPullbackL2 = bearPullbackL2Raw and not bearPullbackL2Duplicate
+
+if bullPullbackL1
+    alert(f_alert_message("Bullish", pendingL1WasMSS ? "MSS" : "BOS", "Level 1 STH/STL", pendingL1BreakLevel, pendingL1BreakClose), alert.freq_once_per_bar)
+    lastAlertL1Direction := 1
+    lastAlertL1BreakLevel := pendingL1BreakLevel
+    lastAlertL1BreakClose := pendingL1BreakClose
+
+if bearPullbackL1
+    alert(f_alert_message("Bearish", pendingL1WasMSS ? "MSS" : "BOS", "Level 1 STH/STL", pendingL1BreakLevel, pendingL1BreakClose), alert.freq_once_per_bar)
+    lastAlertL1Direction := -1
+    lastAlertL1BreakLevel := pendingL1BreakLevel
+    lastAlertL1BreakClose := pendingL1BreakClose
+
+if bullPullbackL2
+    alert(f_alert_message("Bullish", pendingL2WasMSS ? "MSS" : "BOS", "Level 2 ITH/ITL", pendingL2BreakLevel, pendingL2BreakClose), alert.freq_once_per_bar)
+    lastAlertL2Direction := 1
+    lastAlertL2BreakLevel := pendingL2BreakLevel
+    lastAlertL2BreakClose := pendingL2BreakClose
+
+if bearPullbackL2
+    alert(f_alert_message("Bearish", pendingL2WasMSS ? "MSS" : "BOS", "Level 2 ITH/ITL", pendingL2BreakLevel, pendingL2BreakClose), alert.freq_once_per_bar)
+    lastAlertL2Direction := -1
+    lastAlertL2BreakLevel := pendingL2BreakLevel
+    lastAlertL2BreakClose := pendingL2BreakClose
+
+// ====== 突破段标记：在提醒触发时画出（内联，不使用函数修改 var）======
+// 多头突破回踩触发：起点 = 突破前的结构低点，终点 = 当前新 STH
+if (bullPullbackL1 or bullPullbackL2) and showBreakSegment
+    float segStart = bullPullbackL1 ? pendingL1SegmentStart : pendingL2SegmentStart
+    int segStartTime = bullPullbackL1 ? pendingL1SegmentStartTime : pendingL2SegmentStartTime
+    float segEnd = activeSTH
+    int segEndTime = activeSTHTime
+    if not na(segStart) and not na(segEnd)
+        // 清除旧标记
+        if not na(segmentStartLabel)
+            label.delete(segmentStartLabel)
+        if not na(segmentEndLabel)
+            label.delete(segmentEndLabel)
+        if not na(segmentFib618Line)
+            line.delete(segmentFib618Line)
+        // 画新标记
+        segmentStartLabel := label.new(segStartTime, segStart, "起", xloc=xloc.bar_time, style=label.style_label_up, color=segmentArrowColor, textcolor=color.white, size=size.tiny)
+        segmentEndLabel := label.new(segEndTime, segEnd, "顶", xloc=xloc.bar_time, style=label.style_label_down, color=segmentArrowColor, textcolor=color.white, size=size.tiny)
+        if showFib618
+            float fibPrice = f_fib618(segStart, segEnd)
+            segmentFib618Line := line.new(segEndTime, fibPrice, time, fibPrice, xloc=xloc.bar_time, color=fib618Color, width=fib618LineWidth)
+
+// 空头突破回踩触发：起点 = 突破前的结构高点，终点 = 当前新 STL
+if (bearPullbackL1 or bearPullbackL2) and showBreakSegment
+    float segStart = bearPullbackL1 ? pendingL1SegmentStart : pendingL2SegmentStart
+    int segStartTime = bearPullbackL1 ? pendingL1SegmentStartTime : pendingL2SegmentStartTime
+    float segEnd = activeSTL
+    int segEndTime = activeSTLTime
+    if not na(segStart) and not na(segEnd)
+        // 清除旧标记
+        if not na(segmentStartLabel)
+            label.delete(segmentStartLabel)
+        if not na(segmentEndLabel)
+            label.delete(segmentEndLabel)
+        if not na(segmentFib618Line)
+            line.delete(segmentFib618Line)
+        // 画新标记
+        segmentStartLabel := label.new(segStartTime, segStart, "起", xloc=xloc.bar_time, style=label.style_label_down, color=segmentArrowColor, textcolor=color.white, size=size.tiny)
+        segmentEndLabel := label.new(segEndTime, segEnd, "底", xloc=xloc.bar_time, style=label.style_label_up, color=segmentArrowColor, textcolor=color.white, size=size.tiny)
+        if showFib618
+            float fibPrice = f_fib618(segStart, segEnd)
+            segmentFib618Line := line.new(segEndTime, fibPrice, time, fibPrice, xloc=xloc.bar_time, color=fib618Color, width=fib618LineWidth)
+
+// 每根 K 延长回撤线右端到当前 bar
+if not na(segmentFib618Line)
+    line.set_x2(segmentFib618Line, time)
+
+if bullPullbackL1Raw or bearPullbackL1Raw
+    pendingL1Active := false
+
+if bullPullbackL2Raw or bearPullbackL2Raw
+    pendingL2Active := false
+
+bullL1IsL2Source = not na(highestValidHighLine) and not highestValidHighBroken and activeSTHLine == highestValidHighLine and activeSTHLineTime == highestValidHighLineTime
+bearL1IsL2Source = not na(lowestValidLowLine) and not lowestValidLowBroken and activeSTLLine == lowestValidLowLine and activeSTLLineTime == lowestValidLowLineTime
+bullBreakL2 = not na(highestValidHigh) and not highestValidHighBroken and close > highestValidHigh
+bearBreakL2 = not na(lowestValidLow) and not lowestValidLowBroken and close < lowestValidLow
+bullBreakL1 = not bullBreakL2 and not bullL1IsL2Source and not activeSTHIsL2 and not na(activeSTH) and not activeSTHBroken and close > activeSTH and (na(highestValidHigh) or activeSTH < highestValidHigh)
+bearBreakL1 = not bearBreakL2 and not bearL1IsL2Source and not activeSTLIsL2 and not na(activeSTL) and not activeSTLBroken and close < activeSTL and (na(lowestValidLow) or activeSTL > lowestValidLow)
+
+if bullBreakL1
+    isMSS = biasL1 == -1 or biasL1 == 0
+    shouldAlert = alertL1Enabled and (not volumeMode or isVolumeBreakout)
+    breakLineColor = volumeMode and isVolumeBreakout ? volumeBreakColor : level1BreakColor
+    breakLineWidth = f_break_line_width(1, volumeMode and isVolumeBreakout)
+    breakLine := na
+    activeSTHBroken := true
+    biasL1 := 1
+    if showLevel1BOS
+        breakLine := line.new(activeSTHLineTime, activeSTHLine, time, activeSTHLine, xloc=xloc.bar_time, color=breakLineColor, width=breakLineWidth)
+    if pendingL1Direction == -1
+        pendingL1Active := false
+    // 记录突破段起点：这一段上涨的起点（突破前最近一个未破的结构低点）
+    pendingL1SegmentStart := legStartLow
+    pendingL1SegmentStartTime := legStartLowTime
+    if shouldAlert
+        pendingL1Active := true
+        pendingL1Direction := 1
+        pendingL1WasMSS := isMSS
+        pendingL1BreakClose := close
+        pendingL1BreakLevel := activeSTH
+        pendingL1BreakBar := bar_index
+    else
+        if pendingL1Direction == 1
+            pendingL1Active := false
+        if not isVolumeBreakout and f_can_wait_for_volume()
+            volumeWaitActive := true
+            volumeWaitDirection := 1
+            volumeWaitLevel := 1
+            volumeWaitWasMSS := isMSS
+            volumeWaitBreakClose := close
+            volumeWaitBreakLevel := activeSTH
+            volumeWaitBreakBar := bar_index
+            volumeWaitExpiresBar := f_volume_wait_expires_bar(bar_index)
+            volumeWaitSegmentStart := legStartLow
+            volumeWaitSegmentStartTime := legStartLowTime
+            volumeWaitLine := breakLine
+
+if bearBreakL1
+    isMSS = biasL1 == 1 or biasL1 == 0
+    shouldAlert = alertL1Enabled and (not volumeMode or isVolumeBreakout)
+    breakLineColor = volumeMode and isVolumeBreakout ? volumeBreakColor : level1BreakColor
+    breakLineWidth = f_break_line_width(1, volumeMode and isVolumeBreakout)
+    breakLine := na
+    activeSTLBroken := true
+    biasL1 := -1
+    if showLevel1BOS
+        breakLine := line.new(activeSTLLineTime, activeSTLLine, time, activeSTLLine, xloc=xloc.bar_time, color=breakLineColor, width=breakLineWidth)
+    if pendingL1Direction == 1
+        pendingL1Active := false
+    // 记录突破段起点：这一段下跌的起点（突破前最近一个未破的结构高点）
+    pendingL1SegmentStart := legStartHigh
+    pendingL1SegmentStartTime := legStartHighTime
+    if shouldAlert
+        pendingL1Active := true
+        pendingL1Direction := -1
+        pendingL1WasMSS := isMSS
+        pendingL1BreakClose := close
+        pendingL1BreakLevel := activeSTL
+        pendingL1BreakBar := bar_index
+    else
+        if pendingL1Direction == -1
+            pendingL1Active := false
+        if not isVolumeBreakout and f_can_wait_for_volume()
+            volumeWaitActive := true
+            volumeWaitDirection := -1
+            volumeWaitLevel := 1
+            volumeWaitWasMSS := isMSS
+            volumeWaitBreakClose := close
+            volumeWaitBreakLevel := activeSTL
+            volumeWaitBreakBar := bar_index
+            volumeWaitExpiresBar := f_volume_wait_expires_bar(bar_index)
+            volumeWaitSegmentStart := legStartHigh
+            volumeWaitSegmentStartTime := legStartHighTime
+            volumeWaitLine := breakLine
+
+if bullBreakL2
+    isMSS = biasL2 == -1 or biasL2 == 0
+    shouldAlert = alertL2Enabled and (not volumeMode or isVolumeBreakout)
+    breakLineColor = volumeMode and isVolumeBreakout ? volumeBreakColor : level2BreakColor
+    breakLineWidth = f_break_line_width(2, volumeMode and isVolumeBreakout)
+    breakLine := na
+    highestValidHighBroken := true
+    if not na(activeSTH) and close > activeSTH
+        activeSTHBroken := true
+        activeSTHIsL2 := false
+    if not na(activeITH) and close > activeITH
+        activeITHBroken := true
+    biasL2 := 1
+    if showLevel2BOS
+        breakLine := line.new(highestValidHighLineTime, highestValidHighLine, time, highestValidHighLine, xloc=xloc.bar_time, color=breakLineColor, width=breakLineWidth)
+    if pendingL2Direction == -1
+        pendingL2Active := false
+    // 记录突破段起点：这一段上涨的起点（与 L1 同一口径，不再用"最低点"）
+    pendingL2SegmentStart := legStartLow
+    pendingL2SegmentStartTime := legStartLowTime
+    if shouldAlert
+        pendingL2Active := true
+        pendingL2Direction := 1
+        pendingL2WasMSS := isMSS
+        pendingL2BreakClose := close
+        pendingL2BreakLevel := highestValidHigh
+        pendingL2BreakBar := bar_index
+    else
+        if pendingL2Direction == 1
+            pendingL2Active := false
+        if not isVolumeBreakout and f_can_wait_for_volume()
+            volumeWaitActive := true
+            volumeWaitDirection := 1
+            volumeWaitLevel := 2
+            volumeWaitWasMSS := isMSS
+            volumeWaitBreakClose := close
+            volumeWaitBreakLevel := highestValidHigh
+            volumeWaitBreakBar := bar_index
+            volumeWaitExpiresBar := f_volume_wait_expires_bar(bar_index)
+            volumeWaitSegmentStart := legStartLow
+            volumeWaitSegmentStartTime := legStartLowTime
+            volumeWaitLine := breakLine
+
+if bearBreakL2
+    isMSS = biasL2 == 1 or biasL2 == 0
+    shouldAlert = alertL2Enabled and (not volumeMode or isVolumeBreakout)
+    breakLineColor = volumeMode and isVolumeBreakout ? volumeBreakColor : level2BreakColor
+    breakLineWidth = f_break_line_width(2, volumeMode and isVolumeBreakout)
+    breakLine := na
+    lowestValidLowBroken := true
+    if not na(activeSTL) and close < activeSTL
+        activeSTLBroken := true
+        activeSTLIsL2 := false
+    if not na(activeITL) and close < activeITL
+        activeITLBroken := true
+    biasL2 := -1
+    if showLevel2BOS
+        breakLine := line.new(lowestValidLowLineTime, lowestValidLowLine, time, lowestValidLowLine, xloc=xloc.bar_time, color=breakLineColor, width=breakLineWidth)
+    if pendingL2Direction == 1
+        pendingL2Active := false
+    // 记录突破段起点：这一段下跌的起点（与 L1 同一口径，不再用"最高点"）
+    pendingL2SegmentStart := legStartHigh
+    pendingL2SegmentStartTime := legStartHighTime
+    if shouldAlert
+        pendingL2Active := true
+        pendingL2Direction := -1
+        pendingL2WasMSS := isMSS
+        pendingL2BreakClose := close
+        pendingL2BreakLevel := lowestValidLow
+        pendingL2BreakBar := bar_index
+    else
+        if pendingL2Direction == -1
+            pendingL2Active := false
+        if not isVolumeBreakout and f_can_wait_for_volume()
+            volumeWaitActive := true
+            volumeWaitDirection := -1
+            volumeWaitLevel := 2
+            volumeWaitWasMSS := isMSS
+            volumeWaitBreakClose := close
+            volumeWaitBreakLevel := lowestValidLow
+            volumeWaitBreakBar := bar_index
+            volumeWaitExpiresBar := f_volume_wait_expires_bar(bar_index)
+            volumeWaitSegmentStart := legStartHigh
+            volumeWaitSegmentStartTime := legStartHighTime
+            volumeWaitLine := breakLine

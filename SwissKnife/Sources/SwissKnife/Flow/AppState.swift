@@ -281,14 +281,6 @@ final class AppState: ObservableObject {
 
     // MARK: - 调试信息
 
-    /// 生成完整调试信息并复制到剪贴板，便于排查问题
-    func copyDebugInfo() {
-        let info = debugInfo()
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(info, forType: .string)
-    }
-
     func debugInfo() -> String {
         var l: [String] = []
         l.append("Flow Clone v1.0.0 (local.flowclone.app)")

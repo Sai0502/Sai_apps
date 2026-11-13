@@ -883,7 +883,6 @@ struct HighlightedTextEditor: NSViewRepresentable {
 
             // 捕获本次字符编辑信息 (可能已在上一次 textDidChange 中消费)
             let editRange = lastEditRange
-            let editDelta = lastEditDelta
             lastEditRange = nil
             lastEditDelta = 0
 
@@ -904,7 +903,7 @@ struct HighlightedTextEditor: NSViewRepresentable {
             if serialized.isEmpty {
                 // 全选删除/清空: 没有任何内容行, 也不保留任何分隔线
                 note.lineCreatedAt = []
-            } else if let editRange {
+            } else if editRange != nil {
                 let stamp = Date()
                 note.lineCreatedAt = reconcileLineDates(
                     oldText: oldText, newText: serialized,
@@ -1251,7 +1250,7 @@ struct HighlightedTextEditor: NSViewRepresentable {
                 adjustRangesForDividers(oldText: oldText, newText: note.text)
             }
             // 计算 caretOutLine 行的物理偏移 = 行首 + 行内列偏移
-            guard let cl = caretLine, caretFound else {
+            guard caretLine != nil, caretFound else {
                 dflow("重建-输出", "\(lines.count)行 → \(out.count)行 (无光标锚点)")
                 return nil
             }

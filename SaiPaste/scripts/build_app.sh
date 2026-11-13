@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 
 VERSION="${VERSION:-1.0.0}"
 BUILD="${BUILD:-1}"
-APP="packaging/SaiPaste.app"
+APP="SaiPaste.app"
 
 echo "==> Building universal release binary (arm64 + x86_64)"
 swift build -c release --arch arm64 --arch x86_64

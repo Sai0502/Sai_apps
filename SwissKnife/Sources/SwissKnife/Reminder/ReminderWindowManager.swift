@@ -61,7 +61,7 @@ enum ReminderWindowManager {
             w.makeKeyAndOrderFront(nil)
             scheduledImageWindows.append(w)
         }
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateBestEffort()
     }
 
     static var isScheduledImageVisible: Bool { !scheduledImageWindows.isEmpty }

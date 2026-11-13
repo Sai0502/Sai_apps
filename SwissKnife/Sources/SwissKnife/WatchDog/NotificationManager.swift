@@ -1,67 +1,23 @@
 import AppKit
 
+/// 断网提示：只负责响一声提醒用户，不做任何自动恢复动作。
 final class NotificationManager {
-    private static let manualAlertSoundPath = "/System/Library/Sounds/Funk.aiff"
-    private let configuration: AppConfiguration
+    private static let alertSoundPath = "/System/Library/Sounds/Funk.aiff"
 
-    init(configuration: AppConfiguration) {
-        self.configuration = configuration
-    }
-
-    func askDisableUSBAndUseWiFi(service: String?) -> Bool {
-        let semaphore = DispatchSemaphore(value: 0)
-        let wifiName = configuration.wifiName
-        let serviceName = service ?? "iPhone USB"
-        var accepted = false
-
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = "USB 供网失败"
-            alert.informativeText = "USB 供网仍未恢复。是否禁用 \"\(serviceName)\" 并尝试连接 Wi-Fi 热点 \"\(wifiName)\"？"
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "禁用 USB 并连接 Wi-Fi")
-            alert.addButton(withTitle: "人工介入")
-            accepted = alert.runModal() == .alertFirstButtonReturn
-            semaphore.signal()
-        }
-
-        semaphore.wait()
-        return accepted
-    }
-
-    func showManualConnectionAlert() {
-        let wifiName = configuration.wifiName
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = "网络恢复失败"
-            alert.informativeText = "已断网，自动恢复失败，请手动连接热点 \"\(wifiName)\"。"
-            alert.alertStyle = .critical
-            alert.addButton(withTitle: "去手动连接")
-            alert.runModal()
-        }
-    }
-
-    func playManualInterventionSound() {
+    func playOfflineAlert() {
         Task { @MainActor in
-            let sound = NSSound(
-                contentsOfFile: Self.manualAlertSoundPath,
+            guard let sound = NSSound(
+                contentsOfFile: Self.alertSoundPath,
                 byReference: true
-            )
-            let interval = sound.map { max($0.duration + 0.15, 0.35) } ?? 0.75
-
-            for index in 0..<3 {
-                if let sound {
-                    sound.play()
-                } else {
-                    NSSound.beep()
-                }
-
-                if index < 2 {
-                    try? await Task.sleep(
-                        nanoseconds: UInt64(interval * 1_000_000_000)
-                    )
-                }
+            ) else {
+                NSSound.beep()
+                return
             }
+            sound.play()
+            // 保持引用直到播放结束，避免声音对象提前释放导致静音。
+            try? await Task.sleep(
+                nanoseconds: UInt64(max(sound.duration, 0.5) * 1_000_000_000)
+            )
         }
     }
 }

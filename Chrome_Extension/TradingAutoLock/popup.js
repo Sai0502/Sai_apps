@@ -9,7 +9,6 @@ const DEFAULTS = {
   lockTimeRow1: '21:00',
   lockTimeRow2: '04:00',
   lockTimeRow3: '04:00',
-  lockTimeRow4: '21:00',
   tradeCountLockEnabled: false,
   dailyEntryLimit: 30,
   lastPnl: null,
@@ -28,15 +27,12 @@ const clearButton = document.getElementById('clear');
 const lockRow1Btn = document.getElementById('lockRow1Btn');
 const lockRow2Btn = document.getElementById('lockRow2Btn');
 const lockRow3Btn = document.getElementById('lockRow3Btn');
-const lockRow4Btn = document.getElementById('lockRow4Btn');
 const lockTimeRow1Input = document.getElementById('lockTimeRow1');
 const lockTimeRow2Input = document.getElementById('lockTimeRow2');
 const lockTimeRow3Input = document.getElementById('lockTimeRow3');
-const lockTimeRow4Input = document.getElementById('lockTimeRow4');
 const lockHint1El = document.getElementById('lockHint1');
 const lockHint2El = document.getElementById('lockHint2');
 const lockHint3El = document.getElementById('lockHint3');
-const lockHint4El = document.getElementById('lockHint4');
 const nudgeEl = document.getElementById('nudge');
 const resetOffsetButton = document.getElementById('resetOffset');
 const flowStatusEl = document.getElementById('flowStatus');
@@ -83,7 +79,7 @@ const LOCKABLE_SETTING_IDS = [
   'tradeCountLockEnabled'
 ];
 let isBlockedPage = false;
-let currentSite = 'other'; // 'tradovate' | 'topstep' | 'tradesea' | 'other'
+let currentSite = 'other'; // 'tradovate' | 'topstep' | 'other'
 let isBusyState = false;
 let isDataLoading = false;
 let settingsLockedUntil = null;
@@ -93,7 +89,7 @@ let scheduledLoadTimer = null;
 let scheduledRuntimeRefreshTimer = null;
 let lastDiagnosticBundle = null;
 let lastDiagnosticMarkdown = '';
-const POPUP_BUILD_LABEL = 'Trading Auto Lock v1024_1244';
+const POPUP_BUILD_LABEL = 'Trading Auto Lock v1111_1134';
 
 function applyPopupViewportHeight() {
   // Let Chrome size the extension popup naturally. If content exceeds Chrome's
@@ -209,10 +205,9 @@ function setBusy(isBusy) {
   nudgeEl.querySelectorAll('button').forEach(button => {
     button.disabled = disabled;
   });
-  lockRow1Btn.disabled = disabled || currentSite === 'topstep' || currentSite === 'tradesea';
-  lockRow2Btn.disabled = disabled || currentSite === 'topstep' || currentSite === 'tradesea';
+  lockRow1Btn.disabled = disabled || currentSite === 'topstep';
+  lockRow2Btn.disabled = disabled || currentSite === 'topstep';
   lockRow3Btn.disabled = disabled || currentSite !== 'topstep';
-  lockRow4Btn.disabled = disabled || currentSite !== 'tradesea';
   applySettingsLockState();
 }
 
@@ -239,7 +234,6 @@ function sleep(ms) {
 function detectSite(url) {
   if (/^https:\/\/trader\.tradovate\.com\//i.test(url || '')) return 'tradovate';
   if (/^https:\/\/([a-z0-9-]+\.)?topstepx\.com\//i.test(url || '')) return 'topstep';
-  if (/^https:\/\/app\.tradesea\.ai\//i.test(url || '')) return 'tradesea';
   return 'other';
 }
 
@@ -248,7 +242,7 @@ async function getActiveTab() {
   if (!tab || !tab.id) throw new Error('找不到当前标签页');
   const site = detectSite(tab.url || '');
   if (site === 'other') {
-    throw new Error('请先切到 trader.tradovate.com / topstepx.com / app.tradesea.ai 页面');
+    throw new Error('请先切到 trader.tradovate.com / topstepx.com 页面');
   }
   return tab;
 }
@@ -260,18 +254,15 @@ async function updatePageWarning() {
   isBlockedPage = !isSupported;
   pageWarningEl.classList.toggle('hidden', isSupported);
   document.body.classList.toggle('blocked-page', !isSupported);
-  // topstep 页只启用 TS 锁定；tradesea 页只启用 TDS 锁定；均禁用 TDV 相关
+  // topstep 页只启用 TS 锁定，其余平台禁用 TDV 相关
   const isTopstep = currentSite === 'topstep';
-  const isTradesea = currentSite === 'tradesea';
-  lockRow1Btn.disabled = isBlockedPage || isTopstep || isTradesea;
-  lockRow2Btn.disabled = isBlockedPage || isTopstep || isTradesea;
+  lockRow1Btn.disabled = isBlockedPage || isTopstep;
+  lockRow2Btn.disabled = isBlockedPage || isTopstep;
   lockRow3Btn.disabled = isBlockedPage || !isTopstep;
-  lockRow4Btn.disabled = isBlockedPage || !isTradesea;
-  // 蒙版：tradovate 页遮 TS/TDS 行；topstep 页遮 TDV/PnL/TDS 行；tradesea 页遮 TDV/TS/PnL 行
-  document.querySelectorAll('[data-maskable="ts"]').forEach(el => el.classList.toggle('masked', currentSite === 'tradovate' || isTradesea));
-  document.querySelectorAll('[data-maskable="tds"]').forEach(el => el.classList.toggle('masked', currentSite !== 'tradesea'));
-  document.querySelectorAll('[data-maskable="tdv"]').forEach(el => el.classList.toggle('masked', currentSite === 'topstep' || isTradesea));
-  document.querySelectorAll('[data-maskable="pnl"]').forEach(el => el.classList.toggle('masked', currentSite === 'topstep' || isTradesea));
+  // 蒙版：tradovate 页遮 TS 行；topstep 页遮 TDV/PnL 行
+  document.querySelectorAll('[data-maskable="ts"]').forEach(el => el.classList.toggle('masked', currentSite === 'tradovate'));
+  document.querySelectorAll('[data-maskable="tdv"]').forEach(el => el.classList.toggle('masked', currentSite === 'topstep'));
+  document.querySelectorAll('[data-maskable="pnl"]').forEach(el => el.classList.toggle('masked', currentSite === 'topstep'));
   // TDV 下单快捷键：只在 tradovate 页可用，其他页置灰
   const hotkeyEnabled = currentSite === 'tradovate';
   document.querySelectorAll('[data-maskable="hotkey"]').forEach(el => el.classList.toggle('masked', !hotkeyEnabled));
@@ -280,7 +271,7 @@ async function updatePageWarning() {
     pair.to.disabled = !hotkeyEnabled;
   });
   document.querySelectorAll('input, select, button, textarea').forEach(el => {
-    if (el === lockRow3Btn || el === lockRow4Btn) return;
+    if (el === lockRow3Btn) return;
     if (el === lockRow1Btn || el === lockRow2Btn) return;
     if (Object.values(hotkeyInputs).some(pair => pair.from === el || pair.to === el)) return;
     el.disabled = !isSupported || ((isDataLoading || isBusyState) && !canUseWhileDataLoading(el));
@@ -312,7 +303,7 @@ async function loadAccountContext() {
     return null;
   }
   if (currentSite !== 'tradovate') {
-    return null; // topstep / tradesea 页没有 Tradovate 账户上下文，不发 TDV 消息
+    return null; // topstep 页没有 Tradovate 账户上下文，不发 TDV 消息
   }
   try {
     const result = await sendMessage('tradovate-auto-lock:debug-snapshot');
@@ -418,7 +409,7 @@ async function buildFullDiagnosticBundle() {
       } catch (e2) { tsSummary = '(Topstep content script 无响应：' + (e2.message||e2) + ')'; }
     }
     return {
-      diagnosticBundleVersion: '2026-07-01-v2-ts',
+      diagnosticBundleVersion: '2026-11-11-v3-ts',
       platform: 'topstep',
       popupBuild: POPUP_BUILD_LABEL,
       copiedFromPopupAt: new Date().toISOString(),
@@ -426,21 +417,10 @@ async function buildFullDiagnosticBundle() {
       summary: tsSummary
     };
   }
-  // tradesea 页：无 TDV/Topstep 诊断，返回简单 bundle
-  if (currentSite === 'tradesea') {
-    return {
-      diagnosticBundleVersion: '2026-07-01-v2-tds',
-      platform: 'tradesea',
-      popupBuild: POPUP_BUILD_LABEL,
-      copiedFromPopupAt: new Date().toISOString(),
-      activeTab: { url: tab?.url || '', title: tab?.title || '' },
-      summary: 'TradeSea (app.tradesea.ai) 仅支持 TDS 锁定，无 Tradovate/Topstep 诊断数据。'
-    };
-  }
   const pageBundle = await sendMessage('tradovate-auto-lock:diagnostic-bundle');
   const manifest = chrome.runtime.getManifest ? chrome.runtime.getManifest() : null;
   return {
-    diagnosticBundleVersion: '2026-07-01-v2',
+    diagnosticBundleVersion: '2026-11-11-v3',
     copiedFormat: 'markdown-with-json',
     popupBuild: POPUP_BUILD_LABEL,
     copiedFromPopupAt: new Date().toISOString(),
@@ -485,6 +465,7 @@ function diagnosticSignals(bundle) {
     : [];
   const runtimeEvents = Array.isArray(pageBundle.runtimeDiagnosticEvents) ? pageBundle.runtimeDiagnosticEvents : [];
   const websocketCapture = pageBundle.websocketCapture || {};
+  const hotkey = pageBundle.hotkey || {};
   const errors = [
     ...runtimeEvents.filter(item => /error|unhandledrejection|failed|exception/i.test(String(item.type || item.event || ''))),
     ...debugLogs.filter(item => /error|failed|fail|warn|skip/i.test(String(item.event || '')))
@@ -514,6 +495,7 @@ function diagnosticSignals(bundle) {
     warnings,
     resources,
     websocketCapture,
+    hotkey,
     feature,
     permissions,
     lastCandidate,
@@ -526,6 +508,16 @@ function inferWhatCodexShouldLookAt(signals, bundle) {
   const pnlValue = signals.extraction.pnl ?? signals.runtime.lastPnl;
   const pnlSource = signals.extraction.source || signals.runtime.lastPnlSource || '';
   const ws = signals.websocketCapture || {};
+  const hotkey = signals.hotkey || {};
+  if (!hotkey.installed) {
+    tips.push('TDV 快捷键 hook 未返回状态：检查 manifest 是否用 hotkey-hook.js、world=MAIN、document_start，并刷新页面。');
+  } else if (!hotkey.map || !Object.values(hotkey.map).some(item => item && item.to)) {
+    tips.push('快捷键 hook 已安装但生效映射为空：检查 popup 里 W/S/Space 是否保存成功。');
+  } else if (hotkey.last && hotkey.last.matched && hotkey.last.nativeHandled === false) {
+    tips.push('快捷键已拦截，但原生 1/2/3 合成未生效：优先看 hotkey.nativeChord 和 Hotkey 日志；兜底按钮点击可能不带 ATM 止盈止损。');
+  } else if (hotkey.last && hotkey.last.matched && !hotkey.last.nativeHandled && !hotkey.last.clicked) {
+    tips.push('快捷键命中但既未原生处理也未找到按钮：看 hotkey.buttons/actionButtons 的按钮文本与可见性。');
+  }
   if (!ws.hookReady) {
     tips.push('WebSocket 捕获未就绪，优先检查 manifest 注入顺序、MAIN world 支持和是否刷新过 Tradovate 页面。');
   } else if (!Number(ws.frameCount)) {
@@ -554,7 +546,7 @@ function inferWhatCodexShouldLookAt(signals, bundle) {
     tips.push('先核对 Summary 中的 PNL 来源、锁定状态、最近操作日志。');
     tips.push('如果 Summary 不够，再索取 Detailed；不要优先看 Raw。');
   }
-  return tips.slice(0, 5);
+  return tips.slice(0, 6);
 }
 
 function formatSummaryMarkdown(bundle) {
@@ -602,14 +594,50 @@ function formatSummaryMarkdown(bundle) {
   const recentLogLines = s.recentActions.slice(-20).map(compactLogLine);
   const errorLines = [...s.errors, ...s.warnings].slice(-10).map(compactLogLine);
   const lookAt = inferWhatCodexShouldLookAt(s, bundle).map((item, index) => `${index + 1}. ${item}`);
+  const storedHotkeyMap = (s.pageBundle.storage && s.pageBundle.storage.tdvHotkeyMap) || {};
+  const effectiveHotkeyMap = s.hotkey.map || {};
+  const hotkeyLast = s.hotkey.last || null;
+  const hotkeyLogs = Array.isArray(s.hotkey.logs) ? s.hotkey.logs.slice(-8) : [];
+  const hotkeyErrors = Array.isArray(s.hotkey.errors) ? s.hotkey.errors.slice(-6) : [];
+  const hotkeyActionButtons = s.hotkey.actionButtons || {};
+  const hotkeyMapLine = (map, action) => {
+    const cfg = (map && map[action]) || {};
+    return `${action}: ${cfg.from || ''} -> ${cfg.to || '(empty)'}`;
+  };
+  const hotkeyButtonLine = action => {
+    const btn = hotkeyActionButtons[action];
+    if (!btn) return `${action}: 未找到`;
+    const rect = btn.rect ? `${btn.rect.width}x${btn.rect.height}` : '';
+    return `${action}: ${btn.text || btn.normalized || btn.id || btn.tag} ${rect}`.trim();
+  };
+  const hotkeyLastLine = hotkeyLast
+    ? safeJson({
+        key: hotkeyLast.key,
+        code: hotkeyLast.code,
+        chord: hotkeyLast.chord,
+        matched: hotkeyLast.matched,
+        action: hotkeyLast.action,
+        target: hotkeyLast.target,
+        nativeChord: hotkeyLast.nativeChord,
+        nativeHandled: hotkeyLast.nativeHandled,
+        clicked: hotkeyLast.clicked,
+        at: hotkeyLast.at
+      }).replace(/\n/g, ' ')
+    : '无';
+  const hotkeyLogLines = hotkeyLogs.map(item =>
+    `- ${item.time || item.at || ''} ${item.event}: ${safeJson(item.details || {}).replace(/\s+/g, ' ').slice(0, 260)}`
+  );
+  const hotkeyErrorLines = hotkeyErrors.map(item =>
+    `- ${item.time || item.at || ''} ${item.kind}: ${safeJson(item.details || {}).replace(/\s+/g, ' ').slice(0, 320)}`
+  );
 
   return [
     '# TradovateAutoLock AI Debug Summary',
     '',
     '## Problem Context',
-    '用户当前正在做什么：Tradovate PnL 风控/自动锁账户插件运行中',
-    '实际结果：请用户在粘贴时补充实际现象',
-    '预期结果：PNL 达到阈值后稳定自动锁账户，未读到数据时不误判',
+    '诊断对象：Tradovate PnL 风控 / 自动锁账户 / TDV 下单快捷键',
+    `实际结果：autoState=${s.autoState.status || 'unknown'}, pageLocked=${boolText(s.debugSnapshot.pageIndicatesLocked)}, pnl=${pnlValue}, pnlSource=${pnlSource || 'unknown'}, hotkeyInstalled=${boolText(s.hotkey.installed)}, hotkeyLastMatched=${boolText(hotkeyLast && hotkeyLast.matched)}`,
+    '预期结果：PNL 达到阈值后稳定自动锁账户；快捷键命中后走原生 1/2/3 下单并带 ATM 止盈止损',
     '',
     '## Environment',
     `版本：${bundle.popupBuild || ''} / ${(s.pageBundle.build && s.pageBundle.build.scriptBuild) || ''}`,
@@ -628,6 +656,17 @@ function formatSummaryMarkdown(bundle) {
     `WebSocket原始实体命中：${Object.keys(wsEntityCounts).length ? safeJson(wsEntityCounts).replace(/\n/g, ' ') : '无'}（含历史/缓存消息，不等于今天交易次数）`,
     `今日交易次数诊断：account=${wsTradeStats.accountName || wsTradeStats.accountId || ''}, matchedBy=${wsTradeStats.accountMatchedBy || ''}, tradeDay=${wsTradeStats.dateKeyBeijing || ''} ${wsTradeStats.tradeDayStartAtBeijing || ''}-${wsTradeStats.tradeDayEndAtBeijing || ''}, tradeCountToday=${wsTradeStats.tradeCountToday ?? ''}, tradeCountSource=${wsTradeStats.tradeCountSource || ''}, fillsToday=${wsTradeStats.fillCountToday ?? ''}, entryFillsToday=${wsTradeStats.entryFillsToday ?? ''}, flatToPositionEntriesToday=${wsTradeStats.flatToPositionEntriesToday ?? ''}, completedTradesToday=${wsTradeStats.completedTradesToday ?? ''}, positionTradeCountEstimate=${wsTradeStats.positionTradeCountEstimate ?? ''}, positionFillCountEstimate=${wsTradeStats.positionFillCountEstimate ?? ''}, fills30m=${wsTradeStats.fillCountLast30m ?? ''}, fills60m=${wsTradeStats.fillCountLast60m ?? ''}`,
     `持仓判断：source=${positionGuard.source || wsTradeStats.positionStatusSource || 'unknown'}, available=${boolText(positionGuard.available)}, hasOpenPosition=${boolText(positionGuard.hasOpenPosition)}, netAbs=${positionGuard.netAbs ?? ''}, blockedByOpenPosition=${boolText(s.autoState.tradeCountBlockedByOpenPosition)}, visiblePosition=${visiblePosition.ok ? `${boolText(visiblePosition.hasOpenPosition)} ${visiblePosition.text || ''}` : '未读取'}`,
+    '',
+    '## TDV Hotkey',
+    `Hook：installed=${boolText(s.hotkey.installed)}, timeout=${boolText(s.hotkey.timeout)}, build=${s.hotkey.hookBuild || ''}, frame=${s.hotkey.frame || ''}, url=${safeUrlSummaryForPopup(s.hotkey.url || '')}`,
+    `映射（storage）：${hotkeyMapLine(storedHotkeyMap, 'buy')} | ${hotkeyMapLine(storedHotkeyMap, 'sell')} | ${hotkeyMapLine(storedHotkeyMap, 'close')}`,
+    `映射（MAIN 生效）：${hotkeyMapLine(effectiveHotkeyMap, 'buy')} | ${hotkeyMapLine(effectiveHotkeyMap, 'sell')} | ${hotkeyMapLine(effectiveHotkeyMap, 'close')}`,
+    `最近按键：${hotkeyLastLine}`,
+    `按钮匹配：${hotkeyButtonLine('buy')} | ${hotkeyButtonLine('sell')} | ${hotkeyButtonLine('close')}`,
+    `Hotkey 日志：${hotkeyLogLines.length ? '' : '无'}`,
+    ...(hotkeyLogLines.length ? hotkeyLogLines : []),
+    `Hotkey 错误：${hotkeyErrorLines.length ? '' : '无'}`,
+    ...(hotkeyErrorLines.length ? hotkeyErrorLines : []),
     '',
     '## Detection Result',
     `数据来源：${pnlSource || '未获取'}`,
@@ -700,6 +739,7 @@ function compactDetailedBundle(bundle) {
     },
     websocketCapture: s.pageBundle.websocketCapture || null,
     pnlExtraction: s.pageBundle.pnlExtraction,
+    hotkey: s.pageBundle.hotkey || null,
     domDiagnostics: s.pageBundle.domDiagnostics,
     debugSnapshot: s.pageBundle.debugSnapshot,
     storage: s.pageBundle.storage,
@@ -997,6 +1037,7 @@ async function refreshRuntimeStatus() {
 async function load() {
   appTitleEl.textContent = POPUP_BUILD_LABEL;
   await updatePageWarning();
+  loadHotkeyMap().catch(() => {});
   let snapshot = null;
   if (currentSite === 'tradovate') {
     try { snapshot = await loadAccountContext(); } catch (_) {}
@@ -1063,7 +1104,6 @@ async function load() {
   lockTimeRow1Input.value = normalizeTimeInput(scopedSettings && scopedSettings.lockTimeRow1, DEFAULTS.lockTimeRow1);
   lockTimeRow2Input.value = normalizeTimeInput(scopedSettings && scopedSettings.lockTimeRow2, DEFAULTS.lockTimeRow2);
   lockTimeRow3Input.value = normalizeTimeInput(scopedSettings && scopedSettings.lockTimeRow3, DEFAULTS.lockTimeRow3);
-  lockTimeRow4Input.value = normalizeTimeInput(scopedSettings && scopedSettings.lockTimeRow4, DEFAULTS.lockTimeRow4);
   renderLockHints();
   applySettingsLockState();
   if (isSettingsLocked()) {
@@ -1141,7 +1181,6 @@ async function saveSettings({ silent = false, overrides = {} } = {}) {
     lockTimeRow1: normalizeTimeInput(lockTimeRow1Input.value, '21:00'),
     lockTimeRow2: normalizeTimeInput(lockTimeRow2Input.value, '04:00'),
     lockTimeRow3: normalizeTimeInput(lockTimeRow3Input.value, '04:00'),
-    lockTimeRow4: normalizeTimeInput(lockTimeRow4Input.value, '21:00'),
     tradeCountLockEnabled: Boolean($('tradeCountLockEnabled').checked),
     dailyEntryLimit: positiveIntegerFromInput('dailyEntryLimit', DEFAULTS.dailyEntryLimit)
   };
@@ -1225,27 +1264,6 @@ function renderLockHints() {
   lockHint1El.textContent = `锁定到${describeLockTarget(t1)}`;
   lockHint2El.textContent = `锁定到${describeLockTarget(t2)}`;
   lockHint3El.textContent = `TS 锁定到${describeLockTarget(t3)}`;
-  lockHint4El.textContent = `TDS 锁定到${describeLockTarget(normalizeTimeInput(lockTimeRow4Input.value, DEFAULTS.lockTimeRow4))}`;
-}
-
-// TDS 时长换算：面板输入"锁定目标时间"，TDS 只能填整数小时。
-// 规则：从现在到目标时间相差多少分钟，向下取整到小时（保证解锁不晚于目标时间，
-// 留出做单时间）；目标时间已过则按"明天"计算；不足 1 小时则无法锁定（提示）。
-function computeTdsLockHours(targetTimeStr, now) {
-  const m = /^(\d{2}):(\d{2})$/.exec(targetTimeStr || '');
-  if (!m) throw new Error('锁定时间格式不正确');
-  const target = new Date(now.getTime());
-  target.setHours(Number(m[1]), Number(m[2]), 0, 0);
-  let diffMin = Math.round((target.getTime() - now.getTime()) / 60000);
-  if (diffMin < 60) {
-    if (diffMin > 0) {
-      throw new Error('距离目标时间不足 1 小时，无法锁定');
-    }
-    // 目标时间已是今天以前（含恰好此刻）→ 按明天目标时间计算
-    target.setDate(target.getDate() + 1);
-    diffMin += 1440;
-  }
-  return Math.floor(diffMin / 60);
 }
 
 async function triggerLock(targetTime) {
@@ -1312,59 +1330,13 @@ async function triggerTopstepLock(targetTime) {
   }
 }
 
-async function triggerTdsLock() {
-  if (isBlockedPage) return;
-  const timeStr = normalizeTimeInput(lockTimeRow4Input.value, DEFAULTS.lockTimeRow4);
-  let hours;
-  try {
-    hours = computeTdsLockHours(timeStr, new Date());
-  } catch (err) {
-    saveStatusEl.textContent = 'TDS 锁定失败：' + (err && err.message ? err.message : String(err));
-    return;
-  }
-  const ok = window.confirm(`确定立刻锁定 TradeSea 账户？\n\n锁定目标：${describeLockTarget(timeStr)}\nTDS 将输入 ${hours} 小时`);
-  if (!ok) return;
-  const original = lockRow4Btn.textContent;
-  lockRow4Btn.textContent = '锁定中...';
-  lockRow4Btn.disabled = true;
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    let result;
-    try {
-      result = await chrome.tabs.sendMessage(tab.id, { type: 'tradovate-auto-lock:tds-lock', hours });
-    } catch (e) {
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['tradesea-content.js'] });
-      await sleep(300);
-      result = await chrome.tabs.sendMessage(tab.id, { type: 'tradovate-auto-lock:tds-lock', hours });
-    }
-    if (!result || !result.ok) {
-      const errMsg = result && result.error ? result.error : 'TDS 锁定失败';
-      saveStatusEl.textContent = errMsg;
-      if (result && result.log) {
-        diagnosticPreviewEl.textContent = (result.log || []).join('\n');
-        diagnosticDetailsEl.open = true;
-      }
-    } else {
-      const last = result.log && result.log.length ? result.log[result.log.length - 1] : '';
-      saveStatusEl.textContent = 'TDS 锁定完成' + (last ? '（' + last + '）' : '');
-    }
-  } catch (err) {
-    saveStatusEl.textContent = err && err.message ? err.message : String(err);
-  } finally {
-    lockRow4Btn.textContent = original;
-    lockRow4Btn.disabled = false;
-  }
-}
-
 lockRow1Btn.addEventListener('click', () => triggerLock(lockTimeRow1Input.value));
 lockRow2Btn.addEventListener('click', () => triggerLock(lockTimeRow2Input.value));
 lockRow3Btn.addEventListener('click', () => triggerTopstepLock(lockTimeRow3Input.value));
-lockRow4Btn.addEventListener('click', () => triggerTdsLock());
-for (const input of [lockTimeRow1Input, lockTimeRow2Input, lockTimeRow3Input, lockTimeRow4Input]) {
+for (const input of [lockTimeRow1Input, lockTimeRow2Input, lockTimeRow3Input]) {
   input.addEventListener('input', renderLockHints);
   input.addEventListener('change', () => {
-    const fallback = input === lockTimeRow4Input ? DEFAULTS.lockTimeRow4 : DEFAULTS.lockTimeRow1;
-    input.value = normalizeTimeInput(input.value, fallback);
+    input.value = normalizeTimeInput(input.value, DEFAULTS.lockTimeRow1);
     saveSettings();
     renderLockHints();
   });
@@ -1462,11 +1434,21 @@ const HOTKEY_SPECIAL_KEYS = {
 };
 
 function hotkeyKeyName(e) {
+  const code = String(e.code || '');
+  if (code === 'Space') return 'Space';
+  if (['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'Home', 'End', 'PageUp', 'PageDown', 'Insert'].indexOf(code) !== -1) return code;
+  if (/^Arrow/.test(code)) return code;
+  const digit = /^Digit([0-9])$/.exec(code);
+  if (digit) return digit[1];
+  const letter = /^Key([A-Z])$/.exec(code);
+  if (letter) return letter[1];
+  const fkey = /^F([1-9]|1[0-2])$/.exec(code);
+  if (fkey) return 'F' + fkey[1];
   const k = e.key;
-  if (!k || k === 'Dead' || k === 'Unidentified') return null;
+  if (!k || k === 'Dead' || k === 'Unidentified' || k === 'Process') return null;
   const lower = String(k).toLowerCase();
   if (lower === 'control' || lower === 'meta' || lower === 'alt' || lower === 'shift') return null;
-  if (HOTKEY_SPECIAL_KEYS[lower]) return HOTKEY_SPECIAL_KEYS[lower]; // 空格/回车/方向键等特殊键优先统一命名（如 ' ' -> 'Space'）
+  if (HOTKEY_SPECIAL_KEYS[lower]) return HOTKEY_SPECIAL_KEYS[lower];
   if (k.length === 1) return /[0-9]/.test(k) ? k : k.toUpperCase();
   return k;
 }
@@ -1574,7 +1556,5 @@ hotkeyDetailsEl.addEventListener('toggle', () => {
     loadHotkeyMap();
   }
 });
-
-loadHotkeyMap();
 
 load();

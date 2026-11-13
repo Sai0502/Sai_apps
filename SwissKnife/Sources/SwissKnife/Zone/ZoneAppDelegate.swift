@@ -8,7 +8,6 @@ final class ZoneModule: NSObject, @preconcurrency OverlayControllerDelegate {
 
     private let overlayController = OverlayController()
     private let settingsStore = ZoneStore.shared
-    private let logger = ZoneLogger.shared
 
     private override init() {
         super.init()
@@ -48,13 +47,9 @@ final class ZoneModule: NSObject, @preconcurrency OverlayControllerDelegate {
         return item
     }
 
-    /// 工具设置页修改边框颜色后，立即应用到取景框
-    func applyStrokeColor(_ color: NSColor) {
-        overlayController.applyStrokeColor(color)
-    }
-
     /// 四合一调试快照的 Zone 部分
-    func debugSummary() -> String {        let snap = overlayController.currentSnapshot()
+    func debugSummary() -> String {
+        let snap = overlayController.currentSnapshot()
         var l: [String] = []
         l.append("FitRecordZone")
         if let snap {

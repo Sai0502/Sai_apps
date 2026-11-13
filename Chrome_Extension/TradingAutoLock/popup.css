@@ -415,12 +415,6 @@ button.warning {
   color: #241900;
 }
 
-button.success {
-  border-color: #2ecc71;
-  background: #2ecc71;
-  color: #06200f;
-}
-
 button.ghost {
   border-color: var(--line);
   background: transparent;

@@ -4,12 +4,17 @@ import AppKit
 /// 一格状态位 = NetWork-WatchDog 状态 emoji + FlowClone 倒计时；
 /// 点开为按四模块分组的整合菜单（重复项已删减）。
 @MainActor
-final class SwissKnifeMenuBarController: NSObject {
+final class SwissKnifeMenuBarController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let menu = NSMenu()
     private var timer: Timer?
+    private var lastTitle: String?
 
     func start() {
         NSLog("SwissKnife: 状态栏控制器启动")
+        menu.delegate = self
+        statusItem.menu = menu
+        statusItem.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         update()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -32,11 +37,12 @@ final class SwissKnifeMenuBarController: NSObject {
             NSLog("SwissKnife: statusItem.button 为空")
             return
         }
-        button.title = "\(emoji) \(countdown)"
-        button.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        let title = "\(emoji) \(countdown)"
+        if lastTitle != title {
+            lastTitle = title
+            button.title = title
+        }
         button.toolTip = toolTipText()
-        statusItem.menu = buildMenu()
-        NSLog("SwissKnife: 状态栏更新 title=%@ 菜单项=%d", button.title, statusItem.menu?.items.count ?? -1)
     }
 
     private func toolTipText() -> String {
@@ -48,8 +54,9 @@ final class SwissKnifeMenuBarController: NSObject {
 
     // MARK: - 整合菜单
 
-    private func buildMenu() -> NSMenu {
-        let menu = NSMenu()
+    /// 菜单只在展开时构建一次，避免每秒重建整棵菜单。
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
 
         let title = NSMenuItem(title: "Swiss Knife", action: nil, keyEquivalent: "")
         title.isEnabled = false
@@ -63,7 +70,6 @@ final class SwissKnifeMenuBarController: NSObject {
         FlowModule.shared.appendMenuItems(to: menu)
         menu.addItem(.separator())
 
-        WatchDogModule.shared.appendMenuItems(to: menu)
         menu.addItem(.separator())
 
         WheelTamerModule.shared.appendMenuItems(to: menu)
@@ -78,7 +84,6 @@ final class SwissKnifeMenuBarController: NSObject {
         menu.addItem(item("复制调试快照", action: #selector(copySnapshot)))
         menu.addItem(item("设置", action: #selector(showSettings)))
         menu.addItem(item("退出 Swiss Knife", action: #selector(quitApp), keyEquivalent: "q"))
-        return menu
     }
 
     // MARK: - 动作

@@ -3,6 +3,9 @@ import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// 断言里的时间按北京时间写死，固定在 UTC+8 运行，避免依赖机器时区。
+process.env.TZ = 'Asia/Shanghai';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const source = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
 const sandbox = {
@@ -46,7 +49,7 @@ const jsonItems = [
   { title: 'Unemployment Claims', country: 'USD', date: '2026-07-02T08:30:00-04:00', impact: 'Medium' }
 ];
 const parsed = sandbox.normalizeJsonCalendarItems(anchor, jsonItems, settings);
-const days = sandbox.buildDayCards(anchor, parsed.events, parsed.holidays);
+const days = sandbox.buildDayCards(anchor, parsed.events, parsed.holidays, true);
 const wed = days.find(day => day.dateKey === '2026-07-01');
 const thu = days.find(day => day.dateKey === '2026-07-02');
 

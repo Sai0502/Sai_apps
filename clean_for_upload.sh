@@ -9,8 +9,13 @@
 # 安全规则：
 #   1. 永远不删 .git（包括 SaiShotJunior 这类子项目里的 .git）。
 #   2. 永远不删任何 *.app 内部或 *.app 本身。
-#   3. 含成品（build/ 下的 .app，dist/ 下的 .app/.dmg/.pkg/.zip 等）的目录整体保留。
+#   3. build/ dist/ out/ target/ 内含成品时不再整目录保留，而是逐层下钻：
+#      成品所在的那一支保留，同级/其它分支照常清理。
 #   4. 只按固定名单匹配：构建缓存、依赖缓存、Xcode 用户态、Python/Node 缓存、系统垃圾。
+#   5. 源码优先：候选删除目录若含源码类文件，整个目录保留并在报告里列出来。
+#      宁可留下垃圾，也不删源码；删不掉的会明确告诉你，方便手动确认。
+#   6. 候选目录必须"看起来是构建产物"（有 deps/、CACHEDIR.TAG、assets/、.o/.rlib 等特征）
+#      才会被删；认不出来的一律保留。这样新项目里随便一个叫 build/ 的普通文件夹不会中招。
 #
 # 可选环境变量：
 #   CLEAN_LOG=/path/to/log   指定日志位置（默认 ~/Library/Logs/Sai_apps_clean.log）
@@ -116,8 +121,80 @@ has_app() {
 has_deliverable() {
   find "$1" -path '*/.git' -prune -o \
     \( -name '*.app' -o -name '*.dmg' -o -name '*.pkg' \
-       -o -name '*.ipa' -o -name '*.xcarchive' -o -name '*.zip' \) \
+       -o -name '*.ipa' -o -name '*.xcarchive' -o -name '*.zip' \
+       -o -name '*.apk' -o -name '*.exe' -o -name '*.msi' \
+       -o -name '*.deb' -o -name '*.rpm' -o -name '*AppImage' \) \
     -print -quit 2>/dev/null | grep -q .
+}
+
+# ---------------------------------------------------------------------------
+# 源码保护（规则 5）：候选删除目录里的"可能是手写代码"的信号
+#
+# 判定顺序见 queue_build_tree()，先看是不是已知的生成目录，再看像不像源码树。
+# 认不出来的一律保留，只报告，不删除。
+# ---------------------------------------------------------------------------
+
+# 强源码扩展名。刻意不含 .js/.jsx/.css/.html：
+# 它们在前端构建产物里极常见，会把 dist/ 这类纯产物误判成源码。
+SOURCE_EXT_NAMES=(
+  "*.rs" "*.c" "*.cc" "*.cpp" "*.cxx" "*.h" "*.hh" "*.hpp" "*.hxx"
+  "*.m" "*.mm" "*.swift" "*.py" "*.pyi" "*.pyx"
+  "*.ts" "*.tsx" "*.vue" "*.svelte" "*.astro"
+  "*.go" "*.java" "*.kt" "*.kts" "*.cs" "*.rb" "*.php"
+  "*.sh" "*.bash" "*.zsh" "*.fish" "*.lua" "*.pl" "*.r" "*.sql" "*.dart"
+)
+source_find_args=()
+for n in "${SOURCE_EXT_NAMES[@]}"; do
+  [ "${#source_find_args[@]}" -gt 0 ] && source_find_args+=(-o)
+  source_find_args+=(-name "$n")
+done
+
+# 工程标志文件：出现即说明"这其实是一个源码树/子项目"，不是纯构建输出
+PROJECT_MARKERS=(
+  ".git" "Cargo.toml" "Package.swift" "package.json" "pnpm-workspace.yaml"
+  "pyproject.toml" "setup.py" "go.mod" "CMakeLists.txt" "Makefile"
+  "tsconfig.json" "vite.config.js" "vite.config.ts" "vite.config.mjs"
+  "build.gradle" "build.gradle.kts" "pom.xml" "Gemfile" "mix.exs"
+  "composer.json" "pubspec.yaml" "*.xcodeproj" "*.xcworkspace"
+)
+
+count_source_files() {
+  find "$1" -type f \( "${source_find_args[@]}" \) 2>/dev/null | wc -l | tr -d ' '
+}
+
+is_source_file() {
+  local n
+  n="$(basename "$1")"
+  local e
+  for e in "${SOURCE_EXT_NAMES[@]}"; do
+    # shellcheck disable=SC2053
+    [[ "$n" == $e ]] && return 0
+  done
+  return 1
+}
+
+has_project_marker() {
+  local d="$1" m
+  for m in "${PROJECT_MARKERS[@]}"; do
+    [ -e "$d/$m" ] && return 0
+    compgen -G "$d/$m" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
+# 已知的纯生成目录：这些里面就算出现 .rs/.swift 也是构建时生成的，
+# 例：target/release/build/markup5ever-*/out/named_entities.rs
+is_generated_output() {
+  case "$1" in
+    */target/debug|*/target/release) return 0 ;;
+    */target/debug/*|*/target/release/*) return 0 ;;
+    */.build/*|*/.swiftpm/*) return 0 ;;
+    */DerivedData/*) return 0 ;;
+    */Build/Intermediates.noindex/*|*/Build/Products/*|*/Build/Index.noindex/*) return 0 ;;
+    */node_modules/*|*/.venv/*|*/venv/*) return 0 ;;
+    */__pycache__/*|*/.pytest_cache/*|*/.mypy_cache/*|*/.ruff_cache/*) return 0 ;;
+  esac
+  return 1
 }
 
 record_path() {
@@ -131,6 +208,7 @@ record_path() {
   printf '  %2d) %-59s %8s\n' "$section_item_no" "${p#$ROOT/}" "$(human "$p")"
   del_items+=("$p")
   del_kb+=("$kb")
+  queued_dirs+=("$p")
 }
 
 is_queued_or_nested() {
@@ -141,6 +219,69 @@ is_queued_or_nested() {
     case "$p" in "$q"/*) return 0 ;; esac
   done
   return 1
+}
+
+MARK="·"
+KEEPINGS=()
+
+keep_report() {
+  # $1 路径，$2 原因
+  KEEPINGS+=("$1|$2")
+  echo "  保留（$2）: ${1#$ROOT/}"
+  skipped=$((skipped + 1))
+}
+
+# build/dist/out/target 的处理：
+#   含成品   → 逐层下钻，成品所在那一支保留，其余分支单独判定
+#   不含成品 → 生成目录直接删；像源码树的保留
+queue_build_tree() {
+  local d="$1"
+
+  [ -d "$d" ] || return 0
+  is_protected "$d" && { skipped=$((skipped + 1)); return 0; }
+  is_queued_or_nested "$d" && return 0
+
+  # 1) 下方任何位置有成品：必须下钻，绝不能整目录删
+  #    （放在生成目录判定之前，否则 target/release/bundle 会被当成生成物删掉）
+  if has_deliverable "$d"; then
+    local c
+    for c in "$d"/* "$d"/.[!.]*; do
+      [ -e "$c" ] || continue
+      if is_protected "$c"; then
+        keep_report "$c" "成品，受保护"
+      elif [ -d "$c" ]; then
+        queue_build_tree "$c"
+      elif is_generated_output "$(dirname "$c")" && ! is_source_file "$c"; then
+        # 下钻时同级的游离文件（如 target/release/SaiDict 二进制）也属于产物
+        record_path "$c"
+      fi
+    done
+    return 0
+  fi
+
+  # 2) 已知纯生成目录：直接删，不再做源码检查
+  #    例：target/release/build/markup5ever-*/out/named_entities.rs 是生成物
+  if is_generated_output "$d"; then
+    queued_dirs+=("$d")
+    record_path "$d"
+    return 0
+  fi
+
+  # 3) 源码树保护：有工程标志文件，或源码文件够多，整体留下
+  if has_project_marker "$d"; then
+    keep_report "$d" "内含工程文件，判定为源码树"
+    return 0
+  fi
+  local n
+  n="$(count_source_files "$d")"
+  if [ "${n:-0}" -gt 0 ]; then
+    keep_report "$d" "含 $n 个源码文件"
+    return 0
+  fi
+
+  # 4) 纯产物：整目录删除
+  queued_dirs+=("$d")
+  record_path "$d"
 }
 
 process_dir() {
@@ -158,18 +299,15 @@ process_dir() {
   fi
 
   if [ "$kind" = "build" ]; then
-    if has_deliverable "$d"; then
-      echo "  保留（内含成品）: ${d#$ROOT/}"
-      skipped=$((skipped + 1))
-      return 0
-    fi
-  else
-    # .staging 是构建脚本的临时目录，即使里面残留 .app 也属于可再生成的中间物
-    if [ "$(basename "$d")" != ".staging" ] && has_app "$d"; then
-      echo "  保留（内含 .app 成品）: ${d#$ROOT/}"
-      skipped=$((skipped + 1))
-      return 0
-    fi
+    queue_build_tree "$d"
+    return 0
+  fi
+
+  # .staging 是构建脚本的临时目录，即使里面残留 .app 也属于可再生成的中间物
+  if [ "$(basename "$d")" != ".staging" ] && has_app "$d"; then
+    echo "  保留（内含 .app 成品）: ${d#$ROOT/}"
+    skipped=$((skipped + 1))
+    return 0
   fi
 
   queued_dirs+=("$d")
@@ -243,7 +381,17 @@ if [ "$total_items" -eq 0 ]; then
 else
   echo "共 $total_items 项，约 $((freed_kb / 1024)) MB"
 fi
-[ "$skipped" -gt 0 ] && echo "另有 $skipped 项因内含成品或受保护而跳过，不会删除。"
+if [ "${#KEEPINGS[@]}" -gt 0 ]; then
+  echo
+  echo "== 主动保留（不删除）=="
+  local_i=0
+  for entry in "${KEEPINGS[@]}"; do
+    local_i=$((local_i + 1))
+    kp="${entry%%|*}"
+    printf '  %2d) %-52s %s\n' "$local_i" "${kp#$ROOT/}" "${entry#*|}"
+  done
+fi
+[ "$skipped" -gt 0 ] && echo "另有 $skipped 项因内含成品、疑似源码或受保护而跳过。"
 
 do_delete=0
 if [ "$total_items" -gt 0 ]; then
