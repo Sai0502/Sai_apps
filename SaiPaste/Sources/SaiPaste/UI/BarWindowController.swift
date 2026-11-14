@@ -32,6 +32,9 @@ final class BarWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private var phase: Phase = .hidden
+    /// When the bar last finished appearing. A key loss right after this is the
+    /// system reshuffling focus, not the user clicking somewhere else.
+    private var settledAt: Date?
     private var epoch = 0
     private let searchBridge = BarSearchFieldBridge()
     private var targetVisibleFrame: NSRect?
@@ -57,15 +60,19 @@ final class BarWindowController: NSWindowController, NSWindowDelegate {
     init() {
         let panel = BarPanel(
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 360),
-            // A nonactivating panel never lets the agent app become the frontmost
-            // app, so macOS kept routing every keystroke to whatever app was in
-            // front before the bar appeared — the bar looked focused but received
-            // nothing. A plain borderless panel plus an explicit activate() does
-            // put SaiPaste in front, which is what the key window needs.
-            styleMask: [.borderless],
+            // A nonactivating panel becomes key without activating SaiPaste. That
+            // matters over a fullscreen Space: activating an LSUIElement app that
+            // has no window there makes WindowServer move the panel to a desktop
+            // Space, so the bar surfaced behind the desktop instead of the
+            // fullscreen app. This panel therefore never calls activate(); the
+            // local key monitor in AppController routes the first keystroke.
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false)
         panel.isFloatingPanel = true
+        // A click or a command shortcut must reach the panel even though it is
+        // presented without activating the app.
+        panel.becomesKeyOnlyIfNeeded = false
         panel.level = .modalPanel
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -134,6 +141,28 @@ final class BarWindowController: NSWindowController, NSWindowDelegate {
         return dx * dx + dy * dy
     }
 
+    /// What the bar was competing with when it appeared, for the log only.
+    ///
+    /// The fullscreen flag is the one that matters: the bar could not surface on a
+    /// fullscreen Space before, so a recurrence needs to answer "was a fullscreen
+    /// window in front" from the log alone.
+    private static func presentationContext() -> String {
+        guard let front = NSWorkspace.shared.frontmostApplication else { return "nil" }
+        let name = front.localizedName ?? "?"
+        return "\(name)(fullscreen=\(isFullscreen(front)))"
+    }
+
+    private static func isFullscreen(_ app: NSRunningApplication) -> Bool {
+        let element = AXUIElementCreateApplication(app.processIdentifier)
+        var windowRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
+              let windowRef else { return false }
+        var valueRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(windowRef as! AXUIElement, "AXFullScreen" as CFString, &valueRef) == .success,
+              let value = valueRef as? Bool else { return false }
+        return value
+    }
+
     /// Bumps the transition counter so any completion still in flight becomes stale.
     private func beginTransition() -> Int {
         epoch &+= 1
@@ -184,29 +213,29 @@ final class BarWindowController: NSWindowController, NSWindowDelegate {
 
         let token = beginTransition()
         phase = .showing(token)
+        BarLog.log.log("""
+            show: screen=\(NSStringFromRect(vf), privacy: .public) \
+            front=\(Self.presentationContext(), privacy: .public)
+            """)
 
-        // An LSUIElement app is not brought forward by activate() alone once the
-        // panel lost .nonactivatingPanel; ask the running application object too
-        // and report what the system actually thinks in the log.
-        // Order the panel in first, then bring the agent app forward: activating
-        // before there is a key window is what left the bar visible but unable to
-        // receive a single keystroke.
+        // Present without activating the app. orderFrontRegardless brings the
+        // panel up while SaiPaste is not frontmost, and makeKey takes keyboard
+        // focus synchronously, so the first keystroke lands in the bar. Neither
+        // call changes the active Space, which is what keeps the bar on a
+        // fullscreen Space instead of sending it to the desktop.
         panel.orderFrontRegardless()
-        panel.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        NSRunningApplication.current.activate(options: [.activateAllWindows])
+        panel.makeKey()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak panel] in
             let front = NSWorkspace.shared.frontmostApplication?.localizedName ?? "nil"
             BarLog.log.log("focus: app=\(NSApp.isActive, privacy: .public) run=\(NSRunningApplication.current.isActive, privacy: .public) key=\(panel?.isKeyWindow ?? false, privacy: .public) front=\(front, privacy: .public)")
         }
-        // Activation completes asynchronously (measured ~250 ms), and until it
-        // does the panel cannot be key, so a click or the first keystroke of a
-        // fast typist lands in the previous app instead. Re-assert key while the
-        // slide-up runs so the bar is typeable almost immediately.
-        for delay in [0.02, 0.05, 0.09, 0.14, 0.2, 0.4] {
+        // A nonactivating panel still has to win the key window from whatever the
+        // previous app holds, and that is not always immediate. Re-assert key
+        // while the slide-up runs so the bar is typeable almost at once.
+        for delay in [0.05, 0.15] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak panel] in
                 guard let panel, panel.isVisible, !panel.isKeyWindow else { return }
-                panel.makeKeyAndOrderFront(nil)
+                panel.makeKey()
                 BarLog.log.log("rekey at +\(delay, privacy: .public)s key=\(panel.isKeyWindow, privacy: .public) active=\(NSApp.isActive, privacy: .public)")
             }
         }
@@ -215,15 +244,11 @@ final class BarWindowController: NSWindowController, NSWindowDelegate {
             windowKey=\(panel.isKeyWindow, privacy: .public) \
             appPolicy=\(NSApp.activationPolicy().rawValue, privacy: .public)
             """)
-        // Activation completes a few frames after the call above, and until it
-        // does the panel is not key: clicks and the first typed character would
-        // go to the previously active app. Re-assert the key window instead.
-
-
         let finish: @MainActor @Sendable () -> Void = { [weak self] in
             guard let self else { return }
             self.settle(token) {
                 self.phase = .shown
+                self.settledAt = Date()
                 // The panel can lose key focus while it is still animating up, and
                 // windowDidResignKey ignores that because the bar is not .shown yet.
                 // Catch it here so the bar does not sit on screen unfocused forever.
@@ -231,9 +256,11 @@ final class BarWindowController: NSWindowController, NSWindowDelegate {
                 if !panel.isKeyWindow { self.ensureKey() }
                 if panel.isVisible, !panel.isKeyWindow, !AppController.shared.suppressAutoHide {
                     // Give key acquisition one more beat before giving up on the bar.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak panel] in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak panel, weak self] in
                         guard let panel, panel.isVisible, !panel.isKeyWindow else { return }
                         BarLog.log.log("settle fallback hide: key=false active=\(NSApp.isActive, privacy: .public)")
+                        self?.ensureKey()
+                        guard panel.isVisible, !panel.isKeyWindow else { return }
                         AppController.shared.hideBar()
                     }
                 }
@@ -250,11 +277,21 @@ final class BarWindowController: NSWindowController, NSWindowDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.showDuration + 0.05, execute: finish)
     }
 
-    /// Re-assert key focus when activation finished late; macOS refuses a key
-    /// window while the app is still activating.
+    /// Re-assert key focus on the nonactivating panel. Cheap enough to call from
+    /// several places, and the panel is the only window that may be key here.
+    /// True while the panel still holds the system key window.
+    ///
+    /// A nonactivating panel can be the key window while SaiPaste is not the
+    /// frontmost app, and it keeps that status until `orderOut`. Anything typed
+    /// during that window — including the ⌘V the paste path synthesizes — lands
+    /// in SaiPaste instead of the app the user meant to paste into.
+    var holdsKeyWindow: Bool {
+        window?.isKeyWindow ?? false
+    }
+
     private func ensureKey() {
         guard let panel = window, panel.isVisible, isPresented, !panel.isKeyWindow else { return }
-        panel.makeKeyAndOrderFront(nil)
+        panel.makeKey()
 
         BarLog.log.log("ensureKey: key=\(panel.isKeyWindow, privacy: .public) active=\(NSApp.isActive, privacy: .public)")
     }
@@ -266,6 +303,16 @@ final class BarWindowController: NSWindowController, NSWindowDelegate {
 
         let token = beginTransition()
         phase = .hiding(token)
+        // Relinquish key now instead of waiting for orderOut. A nonactivating
+        // panel keeps the system key window until it leaves the screen, and the
+        // paste path posts ⌘V right after hiding — if the panel still held key,
+        // that synthetic keystroke would land back in SaiPaste and the app would
+        // only beep. WindowDidResignKey sees phase == .hiding above and stays out
+        // of the way, so this cannot recurse into a second hide.
+        if panel.isKeyWindow {
+            panel.resignKey()
+            BarLog.log.log("hide: resigned key key=\(panel.isKeyWindow, privacy: .public)")
+        }
         let down = NSRect(x: 0, y: -content.frame.height,
                           width: content.frame.width, height: content.frame.height)
 
@@ -363,10 +410,31 @@ final class BarWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidResignKey(_ notification: Notification) {
         let newKey = NSApp.keyWindow?.barLogName ?? "nil"
-        let appActive = NSApp.isActive
-        BarLog.log.log("resignKey: newKey=\(newKey, privacy: .public) appActive=\(appActive, privacy: .public) phase=\(String(describing: self.phase), privacy: .public)")
+        let sinceSettle = settledAt.map { Date().timeIntervalSince($0) } ?? -1
+        BarLog.log.log("""
+            resignKey: newKey=\(newKey, privacy: .public) \
+            appActive=\(NSApp.isActive, privacy: .public) \
+            phase=\(String(describing: self.phase), privacy: .public) \
+            sinceSettle=\(sinceSettle, privacy: .public)
+            """)
         guard phase == .shown,
               !AppController.shared.suppressAutoHide else { return }
+        // Focus can bounce once right after the panel takes key — a Space change,
+        // another app's window finishing its own transition, the status menu
+        // opening. Hiding on that made the bar flicker away, which reads as "the
+        // hotkey did nothing". Give the system one grace period to hand key back
+        // and only hide if it really is gone.
+        if let settledAt, Date().timeIntervalSince(settledAt) < 0.4 {
+            BarLog.log.log("resignKey: inside settle grace, re-checking")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                guard let self, let panel = self.window, panel.isVisible,
+                      self.phase == .shown, !panel.isKeyWindow,
+                      !AppController.shared.suppressAutoHide else { return }
+                BarLog.log.log("resignKey: key not restored, hiding")
+                AppController.shared.hideBar()
+            }
+            return
+        }
         AppController.shared.hideBar()
     }
 }

@@ -158,12 +158,25 @@ enum PasteService {
     private static func waitForFrontmost(_ app: NSRunningApplication, attempts: Int,
                                          then action: @escaping @MainActor () -> Void) {
         guard attempts > 0, !app.isTerminated else { return }
-        if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier {
+        // The target being frontmost is not sufficient. A nonactivating panel can
+        // still be the key window while SaiPaste is not frontmost, and a ⌘V posted
+        // then lands in SaiPaste. Wait for the bar to really let go of key.
+        let targetIsFront = NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier
+        let keyReleased = !AppController.shared.barHoldsKeyWindow
+        if targetIsFront && keyReleased {
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 30_000_000)
+                BarLog.log.log("paste: front=\(app.localizedName ?? "?", privacy: .public) keyReleased=\(keyReleased, privacy: .public)")
                 action()
             }
             return
+        }
+        if attempts == 1 {
+            BarLog.log.log("""
+                paste: gave up waiting front=\(targetIsFront, privacy: .public) \
+                keyReleased=\(keyReleased, privacy: .public) \
+                keyWindow=\(NSApp.keyWindow?.barLogName ?? "nil", privacy: .public)
+                """)
         }
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 30_000_000)

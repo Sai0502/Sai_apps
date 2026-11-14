@@ -21,6 +21,10 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     var suppressAutoHide = false
 
+    /// True while the bar still owns the system key window, even though SaiPaste
+    /// itself is not active. The paste path has to wait this out.
+    var barHoldsKeyWindow: Bool { barController?.holdsKeyWindow ?? false }
+
     /// When the search query last became empty via the keyboard. A bare
     /// Backspace deletes the selected clip, and the keystroke that clears the
     /// query must stay unambiguously separate from the keystroke that deletes.
@@ -190,6 +194,10 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     func toggleBar() {
+        BarLog.log.log("""
+            hotkey: presented=\(self.barController?.isPresented ?? false, privacy: .public) \
+            front=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "nil", privacy: .public)
+            """)
         if let bar = barController, bar.isPresented {
             hideBar()
         } else {
